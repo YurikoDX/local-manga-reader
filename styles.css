@@ -110,3 +110,13 @@ button {
     background-color: #0f0f0f69;
   }
 }
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  /* 精确一屏 */
+  overflow: hidden;
+  /* 1. 禁止滚动 */
+}
