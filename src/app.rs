@@ -25,6 +25,11 @@ struct CreateMangaPayload {
     count: usize,
 }
 
+#[derive(Deserialize, Serialize)]
+struct PageTurnPayload {
+    count: usize,
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     // // 组件挂载后执行一次
@@ -38,18 +43,20 @@ pub fn App() -> impl IntoView {
     //     closure.forget(); // 内存交给浏览器
     // });
 
-    let (img_1_data, set_img_1_data) = signal(String::new());
-    let (img_2_data, set_img_2_data) = signal(String::new());
+    let (size, set_size) = signal(2_usize);
+    set_size.set(5);
+    let (img_data, set_img_data) = signal(vec![String::new(); size.get_untracked()]);
 
     // 通用：调用指定命令，返回 Vec<String> 并更新两张图
     let load_and_show = move |cmd: &'static str| {
         spawn_local(async move {
+            let payload = PageTurnPayload { count: size.get_untracked() };
+            let args = serde_wasm_bindgen::to_value(&payload).unwrap();
             let resp: Option<Vec<String>> =
-                serde_wasm_bindgen::from_value(invoke(cmd, JsValue::NULL).await).unwrap();
+                serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
             if let Some(mut paths) = resp {
-                // 注意 pop 顺序：后出的是 img1，先出的是 img2
-                set_img_2_data.set(paths.pop().unwrap());
-                set_img_1_data.set(paths.pop().unwrap());
+                paths.resize(size.get(), String::new());
+                set_img_data.set(paths);
             }
         })
     };
@@ -67,11 +74,33 @@ pub fn App() -> impl IntoView {
         }
     };
 
+    let on_wheel = move |ev: leptos::ev::WheelEvent| {
+        ev.prevent_default();                       // 阻止页面本身滚动
+        let dy = ev.delta_y();
+        if dy > -3.0 {            // 向下滚
+            load_and_show("next");
+        } else if dy < 3.0 {      // 向上滚
+            load_and_show("last");
+        }
+    };
+
     Effect::new(move |_| {
         let closure = Closure::wrap(Box::new(move |ev: KeyboardEvent| {
             match ev.code().as_str() {
                 "ArrowRight" | "ArrowDown" | "KeyD" => load_and_show("next"),
                 "ArrowLeft" | "ArrowUp" | "KeyA" => load_and_show("last"),
+                "Minus" => {
+                    let size_before = size.get_untracked();
+                    let size_now = size_before - 1;
+                    set_size.set(size_now);
+                    load_and_show("refresh");
+                },
+                "Equal" => {
+                    let size_before = size.get_untracked();
+                    let size_now = size_before + 1;
+                    set_size.set(size_now);
+                    load_and_show("refresh");
+                },
                 _ => {}
             }
         }) as Box<dyn FnMut(KeyboardEvent)>);
@@ -94,14 +123,14 @@ pub fn App() -> impl IntoView {
 
                 spawn_local(async move {
                     if let Some(path) = paths_array.into_iter().next() {
-                        let payload = CreateMangaPayload { path: path, count: 2 };
+                        let size = size.get();
+                        let payload = CreateMangaPayload { path: path, count: size };
                         let args = serde_wasm_bindgen::to_value(&payload).unwrap();
                         let pages_path = invoke("create_manga", args).await;
                         let mut resp: Vec<String> = serde_wasm_bindgen::from_value(pages_path).unwrap();
-                        set_img_2_data.set(resp.pop().unwrap());
-                        set_img_1_data.set(resp.pop().unwrap());
+                        resp.resize(size, String::new());
+                        set_img_data.set(resp);
                     }
-
                 });
                 
             }
@@ -116,9 +145,9 @@ pub fn App() -> impl IntoView {
             style="display:flex; height:100vh; width:100%; margin:0; padding:0;"
             on:contextmenu=|ev| ev.prevent_default()
             on:mousedown=on_mousedown
+            on:wheel=on_wheel
         >
-            <ImageViewer file_path=img_1_data />
-            <ImageViewer file_path=img_2_data />
+            <MultiImageViewer file_paths=img_data />
         </div>
     }
     // view! {
@@ -143,6 +172,62 @@ fn extract_paths_from_event(event: JsValue) -> Option<Vec<String>> {
     // 使用 serde 直接反序列化
     let drag_event: DragDropEvent = serde_wasm_bindgen::from_value(event).ok()?;
     Some(drag_event.payload.paths)
+}
+
+#[component]
+pub fn MultiImageViewer(file_paths: ReadSignal<Vec<String>>) -> impl IntoView {
+    // 直接把 Vec<String> 映射成 Vec<ReadSignal<String>>
+    let (readers, set_readers) = signal(Vec::new());
+    let mut writers = Vec::new();
+    let (size, set_size) = signal(file_paths.get_untracked().len());
+    {
+        let file_paths = file_paths.get_untracked();
+        let mut readers_v = Vec::new();
+        for file_path in file_paths.into_iter() {
+            let (r, w) = signal(file_path);
+            readers_v.push(r);
+            writers.push(w);
+        }
+        set_readers.set(readers_v);
+    }
+
+    Effect::new(move |_| {
+        let mut size_now = size.get_untracked();
+        let file_paths = file_paths.get();
+        if size_now < file_paths.len() {
+            let mut readers_v = readers.get_untracked();
+            while size_now < file_paths.len() {
+                let (r, w) = signal(String::new());
+                readers_v.push(r);
+                writers.push(w);
+                size_now += 1;
+            }
+            set_size.set(size_now);
+            set_readers.set(readers_v);
+        } else if size_now > file_paths.len() {
+            set_size.set(file_paths.len());
+        }
+        for (i, file_path) in file_paths.into_iter().enumerate() {
+            writers[i].set(file_path);
+        }
+    });
+
+    view! {
+        <div class="row"
+            style="display:flex; height:100vh; width:100%; margin:0; padding:0;">
+            {move || {
+                (0..size.get())
+                    .map(|i| {
+                        let rs = readers.get_untracked();
+                        let r = rs[i];
+                        view! {
+                            <ImageViewer file_path=r />
+                        }
+                    })
+                    .collect_view()
+            }}
+        </div>
+    }
 }
 
 #[component]

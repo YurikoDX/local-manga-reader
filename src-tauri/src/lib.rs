@@ -1,82 +1,30 @@
 use tauri::{AppHandle, Manager, Builder, State, Emitter};
 use std::path::{Path, PathBuf};
-use zip::ZipArchive;
+
 use std::{fs::File, io::{self, Write, Read}};
 use std::sync::Mutex;
 use serde::{Serialize, Serializer, Deserialize, Deserializer, de::{self, MapAccess, Visitor}};
 use std::fmt;
 
-pub type FileBytes = Vec<u8>;
+mod source;
+use source::{PageSource, NoSource, PageCache, ZippedSource};
 
-trait PageSource: Send + Sync {
-    fn get_page(&mut self, index: usize) -> Result<FileBytes, String>;
-    fn page_count(&self) -> usize;
-}
-
-struct NoSource;
-
-impl PageSource for NoSource {
-    fn get_page(&mut self, _index: usize) -> Result<FileBytes, String> {
-        Err(String::from("No source"))
-    }
-
-    fn page_count(&self) -> usize {
-        0
-    }
-}
-
-struct ZippedSource {
-    zip_archive: ZipArchive<File>,
-}
-    
-impl PageSource for ZippedSource {
-    fn get_page(&mut self, index: usize) -> Result<FileBytes, String> {
-        let mut file = self.zip_archive.by_index(index).map_err(|e| e.to_string())?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
-        Ok(buffer)
-    }
-
-    fn page_count(&self) -> usize {
-        self.zip_archive.len()
-    }
-}
-
-impl ZippedSource {
-    pub fn new(file: File) -> io::Result<Self> {
-        let zip_archive = ZipArchive::new(file)?;
-        Ok(Self { zip_archive })
-    }
-}
-
-struct PageCache {
+struct CacheDir {
     path: PathBuf,
 }
 
-impl PageCache {
-    pub fn new(content: impl AsRef<[u8]>, path: impl AsRef<Path>) -> io::Result<Self> {
-        let mut file = File::create(path.as_ref())?;
-        file.write_all(content.as_ref())?;
+impl CacheDir {
+    pub fn new(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
-        Ok(Self { path })
+        Self { path }
     }
 
-    pub fn get_path(&self) -> &Path {
+    fn get_path(&self) -> &Path {
         self.path.as_path()
     }
 }
 
-impl Drop for PageCache {
-    fn drop(&mut self) {
-        println!("dropping {}", self.path.to_string_lossy());
-        if let Err(e) = std::fs::remove_file(self.path.as_path()) {
-            println!("Error removing page cache: {}", e);
-        }
-    }
-}
-
 struct MangaBook {
-    
     cache_dir: PathBuf,
     source: Box<dyn PageSource>,
     page_caches: Vec<Option<PageCache>>,
@@ -167,7 +115,7 @@ fn read_binary_file(path: &str, app: AppHandle) -> Vec<u8> {
 
 #[tauri::command]
 fn create_manga(path: &str, count: usize, app: AppHandle, state: State<Mutex<MangaBook>>) -> Vec<String> {
-    let cache_dir = app.path().resolve("", tauri::path::BaseDirectory::AppData).unwrap().join("cache");
+    let cache_dir = app.path().resolve("cache", tauri::path::BaseDirectory::AppData).unwrap();
     let mut manga = state.lock().unwrap();
     *manga = MangaBook::new(path, cache_dir).unwrap();
     let pages = manga.jump_to(0, count).unwrap();
@@ -176,17 +124,24 @@ fn create_manga(path: &str, count: usize, app: AppHandle, state: State<Mutex<Man
 }
 
 #[tauri::command]
-fn next(state: State<Mutex<MangaBook>>) -> Option<Vec<String>> {
-    println!("next page");
+fn next(count: usize, state: State<Mutex<MangaBook>>) -> Option<Vec<String>> {
+    println!("next {} page", count);
     let mut manga = state.lock().unwrap();
-    manga.next_page(2).ok()
+    manga.next_page(count).ok()
 }
 
 #[tauri::command]
-fn last(state: State<Mutex<MangaBook>>) -> Option<Vec<String>> {
-    println!("last page");
+fn last(count: usize, state: State<Mutex<MangaBook>>) -> Option<Vec<String>> {
+    println!("last {} page", count);
     let mut manga = state.lock().unwrap();
-    manga.last_page(2).ok()
+    manga.last_page(count).ok()
+}
+
+#[tauri::command]
+fn refresh(count: usize, state: State<Mutex<MangaBook>>) -> Vec<String> {
+    println!("refresh {} page", count);
+    let mut manga = state.lock().unwrap();
+    manga.refresh(count).unwrap()
 }
 
 #[tauri::command]
@@ -223,7 +178,7 @@ pub fn run() {
         })
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, read_binary_file, error_test, create_manga, next, last])
+        .invoke_handler(tauri::generate_handler![greet, read_binary_file, error_test, create_manga, next, last, refresh])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
