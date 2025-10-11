@@ -1,5 +1,6 @@
 use tauri::{AppHandle, Manager, Builder, State, Emitter};
 use std::path::{Path, PathBuf};
+use tauri_plugin_dialog::DialogExt;
 
 use std::{fs::File, io::{self, Write, Read}};
 use std::sync::Mutex;
@@ -9,25 +10,10 @@ use std::fmt;
 mod source;
 use source::{PageSource, NoSource, PageCache, ZippedSource};
 
-struct CacheDir {
-    path: PathBuf,
-}
-
-impl CacheDir {
-    pub fn new(path: impl AsRef<Path>) -> Self {
-        let path = path.as_ref().to_path_buf();
-        Self { path }
-    }
-
-    fn get_path(&self) -> &Path {
-        self.path.as_path()
-    }
-}
+use shared::LoadPageResult;
 
 struct MangaBook {
-    cache_dir: PathBuf,
     source: Box<dyn PageSource>,
-    page_caches: Vec<Option<PageCache>>,
     current_page: usize,
     previous_page: usize,
 }
@@ -35,9 +21,7 @@ struct MangaBook {
 impl Default for MangaBook {
     fn default() -> Self {
         Self {
-            cache_dir: Default::default(),
             source: Box::new(NoSource),
-            page_caches: vec![],
             current_page: 0,
             previous_page: 0,
         }
@@ -45,25 +29,15 @@ impl Default for MangaBook {
 }
 
 impl MangaBook {
-    fn get_page_path(&mut self, index: usize) -> Result<PathBuf, String> {
-        if index >= self.source.page_count() {
-            return Ok(Default::default());
-        }
-        if let Some(page_cache) = self.page_caches[index].as_ref() {
-            return Ok(page_cache.get_path().to_path_buf());
-        }
-        let path = self.cache_dir.join(format!("page_{:03}.jpg", index));
-        let file = self.source.get_page(index).map_err(|e| e.to_string())?;
-        self.page_caches[index] = Some(PageCache::new(file, path.as_path()).map_err(|e| e.to_string())?);
-        Ok(path)
+    fn get_page_path(&mut self, index: usize) -> anyhow::Result<String> {
+        Ok(self.source.get_page(index)?.to_string_lossy().to_string())
     }
 
-    fn refresh(&mut self, count: usize) -> Result<Vec<String>, String> {
-        let len = self.source.page_count();
+    fn refresh(&mut self, count: usize) -> anyhow::Result<Vec<String>> {
         let mut pages = Vec::with_capacity(count);
         for i in self.current_page..self.current_page + count {
             let path = self.get_page_path(i)?;
-            pages.push(path.to_string_lossy().to_string());
+            pages.push(path);
         }
         Ok(pages)
     }
@@ -72,13 +46,12 @@ impl MangaBook {
         let file = File::open(path)?;
         std::fs::create_dir_all(cache_dir.as_ref())?;
 
-        let source = Box::new(ZippedSource::new(file)?);
-        let page_caches: Vec<Option<PageCache>> = (0..source.page_count()).map(|_| None).collect();
-        Ok(Self { source, page_caches, current_page: 0, previous_page: 0, cache_dir: cache_dir.as_ref().to_path_buf() })
+        let source = Box::new(ZippedSource::new(file, cache_dir)?);
+        Ok(Self { source, current_page: 0, previous_page: 0 })
 
     }
 
-    pub fn next_page(&mut self, count: usize) -> Result<Vec<String>, String> {
+    pub fn next_page(&mut self, count: usize) -> anyhow::Result<Vec<String>> {
         let len = self.source.page_count();
         if self.current_page + count < len {
             self.current_page += count;
@@ -86,14 +59,25 @@ impl MangaBook {
         self.refresh(count)
     }
 
-    pub fn last_page(&mut self, count: usize) -> Result<Vec<String>, String> {
-        let len = self.source.page_count();
+    pub fn last_page(&mut self, count: usize) -> anyhow::Result<Vec<String>> {
         self.current_page = self.current_page.saturating_sub(count);
         self.refresh(count)
     }
 
-    pub fn jump_to(&mut self, index: usize, count: usize) -> Result<Vec<String>, String> {
+    pub fn step_next_page(&mut self, count: usize) -> anyhow::Result<Vec<String>> {
         let len = self.source.page_count();
+        if self.current_page + 1 < len {
+            self.current_page += 1;
+        }
+        self.refresh(count)
+    }
+
+    pub fn step_last_page(&mut self, count: usize) -> anyhow::Result<Vec<String>> {
+        self.current_page = self.current_page.saturating_sub(1);
+        self.refresh(count)
+    }
+
+    pub fn jump_to(&mut self, index: usize, count: usize) -> anyhow::Result<Vec<String>> {
         self.previous_page = self.current_page;
         self.current_page = index;
         self.refresh(count)
@@ -113,40 +97,101 @@ fn read_binary_file(path: &str, app: AppHandle) -> Vec<u8> {
     std::fs::read(path).unwrap()
 }
 
-#[tauri::command]
-fn create_manga(path: &str, count: usize, app: AppHandle, state: State<Mutex<MangaBook>>) -> Vec<String> {
-    let cache_dir = app.path().resolve("cache", tauri::path::BaseDirectory::AppData).unwrap();
-    let mut manga = state.lock().unwrap();
-    *manga = MangaBook::new(path, cache_dir).unwrap();
-    let pages = manga.jump_to(0, count).unwrap();
-    dbg!(&pages);
-    pages
+fn try_create_manga(path: &str, count: usize, cache_dir: PathBuf) -> anyhow::Result<(MangaBook, Vec<String>)> {
+    let mut manga = MangaBook::new(path, cache_dir)?;
+    let pages = manga.jump_to(0, count)?;
+    Ok((manga, pages))
 }
 
 #[tauri::command]
-fn next(count: usize, state: State<Mutex<MangaBook>>) -> Option<Vec<String>> {
+fn create_manga(path: &str, count: usize, app: AppHandle, state: State<Mutex<MangaBook>>) -> LoadPageResult {
+    let cache_dir = app.path().resolve("cache", tauri::path::BaseDirectory::AppData).unwrap();
+    
+    match try_create_manga(path, count, cache_dir) {
+        Ok((manga, pages)) => {
+            let mut manga_mut = state.lock().unwrap();
+            *manga_mut = manga;
+            Ok(pages)
+        },
+        Err(e) => Err(e),
+    }.into()
+}
+
+#[tauri::command]
+fn next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     println!("next {} page", count);
     let mut manga = state.lock().unwrap();
-    manga.next_page(count).ok()
+    manga.next_page(count).into()
 }
 
 #[tauri::command]
-fn last(count: usize, state: State<Mutex<MangaBook>>) -> Option<Vec<String>> {
+fn last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     println!("last {} page", count);
     let mut manga = state.lock().unwrap();
-    manga.last_page(count).ok()
+    manga.last_page(count).into()
 }
 
 #[tauri::command]
-fn refresh(count: usize, state: State<Mutex<MangaBook>>) -> Vec<String> {
+fn step_next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
+    println!("step next {} page", count);
+    let mut manga = state.lock().unwrap();
+    manga.step_next_page(count).into()
+}
+
+#[tauri::command]
+fn step_last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
+    println!("step last {} page", count);
+    let mut manga = state.lock().unwrap();
+    manga.step_last_page(count).into()
+}
+
+#[tauri::command]
+fn refresh(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     println!("refresh {} page", count);
     let mut manga = state.lock().unwrap();
-    manga.refresh(count).unwrap()
+    manga.refresh(count).into()
 }
 
 #[tauri::command]
-fn error_test() -> Result<(), String> {
-    std::fs::File::open("not_exists.txt").map(|_| ()).map_err(|e| e.to_string())
+fn pick_file(count: usize, app: tauri::AppHandle, state: State<Mutex<MangaBook>>) -> LoadPageResult {
+    let window = app.get_webview_window("main").unwrap();
+    window.hide().unwrap();
+
+    let path = app
+        .dialog()
+        .file()
+        .set_title("选择漫画")
+        .add_filter("压缩文件", &["zip"])
+        .blocking_pick_file();
+    window.show().unwrap();
+
+    if let Some(p) = path {
+        create_manga(p.to_string().as_str(), count, app, state)
+    } else {
+        LoadPageResult::Cancel
+    }
+}
+
+#[tauri::command]
+fn show_popup(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    dbg!("here");
+    app.dialog()
+        .message(&text)
+        .title("提示")
+        .show(|_| ());
+    
+    Ok(())
+}
+
+
+// #[tauri::command]
+// fn error_test() -> Result<(), LoadPageError> {
+//     Err(LoadPageError::NeedPassword)
+// }
+
+#[tauri::command]
+fn error_test() -> LoadPageResult {
+    LoadPageResult::Other(String::from("这是一个错误"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -164,9 +209,9 @@ pub fn run() {
                         println!(">>> window closing — 清缓存");
                         // 这里把 page_caches 填 None，Drop 立即跑
                         let state = app_handle.state::<Mutex<MangaBook>>();
-                        for item in state.lock().unwrap().page_caches.iter_mut() {
-                            item.take();
-                        }
+                        let mut manga = state.lock().unwrap();
+                        let mut empty = MangaBook::default();
+                        std::mem::swap(&mut empty, &mut manga);
                     },
                     WindowEvent::Destroyed => {
                         println!(">>> window destroyed");
@@ -178,7 +223,8 @@ pub fn run() {
         })
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, read_binary_file, error_test, create_manga, next, last, refresh])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![greet, read_binary_file, error_test, create_manga, next, last, refresh, step_next, step_last, pick_file, show_popup])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

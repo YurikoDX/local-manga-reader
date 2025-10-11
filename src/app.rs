@@ -7,6 +7,8 @@ use leptos::*;
 use web_sys::{Blob, Url, BlobPropertyBag, KeyboardEvent};
 use js_sys::{Uint8Array, Array, Object, Reflect};
 
+use shared::LoadPageResult::{self, *};
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"])]
@@ -17,6 +19,12 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], js_name = convertFileSrc)]
     fn convert_file_src(file_path: &str) -> String;
+}
+
+#[wasm_bindgen]
+pub fn show_prompt(message: &str) -> Option<String> {
+    web_sys::window()?
+        .prompt_with_message(message).unwrap_or_default()
 }
 
 #[derive(Deserialize, Serialize)]
@@ -30,78 +38,159 @@ struct PageTurnPayload {
     count: usize,
 }
 
+#[derive(Deserialize, Serialize)]
+struct TextPayload {
+    text: String,
+}
+
 #[component]
 pub fn App() -> impl IntoView {
-    // // 组件挂载后执行一次
-    // Effect::new(move |_| {
-    //     let closure = Closure::wrap(Box::new(|e: web_sys::MouseEvent| {
-    //         e.prevent_default();   // 关键：阻止默认菜单
-    //     }) as Box<dyn FnMut(_)>);
-
-    //     window()
-    //         .set_oncontextmenu(Some(closure.as_ref().unchecked_ref()));
-    //     closure.forget(); // 内存交给浏览器
-    // });
-
+    let (empty, set_empty) = signal(true);
     let (size, set_size) = signal(2_usize);
-    set_size.set(5);
     let (img_data, set_img_data) = signal(vec![String::new(); size.get_untracked()]);
+    let (reading_direction, set_reading_direction) = signal(true);
 
     // 通用：调用指定命令，返回 Vec<String> 并更新两张图
     let load_and_show = move |cmd: &'static str| {
         spawn_local(async move {
             let payload = PageTurnPayload { count: size.get_untracked() };
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-            let resp: Option<Vec<String>> =
-                serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
-            if let Some(mut paths) = resp {
-                paths.resize(size.get(), String::new());
+            let raw = invoke(cmd, args).await;
+            let resp: LoadPageResult = serde_wasm_bindgen::from_value(raw).unwrap();
+            if let LoadPageResult::Ok(mut paths) = resp {
+                set_empty.set(false);
+                paths.resize(size.get_untracked(), String::new());
                 set_img_data.set(paths);
             }
         })
     };
 
+    let show_help = || {
+        spawn_local(async move {
+            let payload = TextPayload { text: String::from("哇袄！") };
+            let args = serde_wasm_bindgen::to_value(&payload).unwrap();
+            invoke("show_popup", args).await;
+            // if let Some(window) = web_sys::window() {
+            //     window.alert_with_message("哇袄！").unwrap();
+            // }
+
+        })
+    };
+
     let on_mousedown = move |ev: leptos::ev::MouseEvent| {
-        match ev.button() {
-            0 => {
-                // 调 Tauri 命令
-                load_and_show("next");
+        if empty.get_untracked() {
+            load_and_show("pick_file");
+        } else {
+            match ev.button() {
+                0 => {
+                    load_and_show("next");
+                }
+                2 => {
+                    load_and_show("last");
+                }
+                _ => {}
             }
-            2 => {
-                load_and_show("last");
-            }
-            _ => {}
         }
     };
 
     let on_wheel = move |ev: leptos::ev::WheelEvent| {
         ev.prevent_default();                       // 阻止页面本身滚动
-        let dy = ev.delta_y();
-        if dy > -3.0 {            // 向下滚
-            load_and_show("next");
-        } else if dy < 3.0 {      // 向上滚
-            load_and_show("last");
+        if !empty.get_untracked() {
+            let dy = ev.delta_y();
+            if dy > -3.0 {            // 向下滚
+                load_and_show("next");
+            } else if dy < 3.0 {      // 向上滚
+                load_and_show("last");
+            }
         }
     };
 
     Effect::new(move |_| {
         let closure = Closure::wrap(Box::new(move |ev: KeyboardEvent| {
-            match ev.code().as_str() {
-                "ArrowRight" | "ArrowDown" | "KeyD" => load_and_show("next"),
-                "ArrowLeft" | "ArrowUp" | "KeyA" => load_and_show("last"),
-                "Minus" => {
-                    let size_before = size.get_untracked();
-                    let size_now = size_before - 1;
-                    set_size.set(size_now);
-                    load_and_show("refresh");
-                },
-                "Equal" => {
-                    let size_before = size.get_untracked();
-                    let size_now = size_before + 1;
-                    set_size.set(size_now);
-                    load_and_show("refresh");
-                },
-                _ => {}
+            if empty.get_untracked() {
+                if ev.code() == "KeyO" {
+                    load_and_show("pick_file");
+                }
+                
+                // if ev.code() == "KeyL" {
+                //     web_sys::console::log_1(&serde_wasm_bindgen::to_value("进来了").unwrap());
+                //     spawn_local(async move {
+                //         match serde_wasm_bindgen::from_value::<LoadPageResult>(invoke("error_test", JsValue::null()).await) {
+                //             Ok(x) => {
+                //                 let m = format!("{:?}", x);
+                //                 web_sys::console::log_1(&serde_wasm_bindgen::to_value(&m).unwrap());
+                //             },
+                //             Err(_) => {
+                //                 web_sys::console::log_1(&serde_wasm_bindgen::to_value("序列化失败了").unwrap());
+                //             },
+                //         }
+                //         // let m = match r {
+                //         //     Ok(()) => "yes",
+                //         //     Err(LoadPageError::NeedPassword) => "NeedPassword",
+                //         //     Err(LoadPageError::Other(_s)) => "other",
+                //         // };
+                //         // web_sys::console::log_1(&serde_wasm_bindgen::to_value(&m).unwrap());
+                //     });
+
+                // }
+            } else {
+                match ev.code().as_str() {
+                    "ArrowDown"  => load_and_show("next"),
+                    "ArrowRight" => load_and_show(if reading_direction.get_untracked() { "last" } else { "next" }),
+                    "ArrowUp" => load_and_show("last"),
+                    "ArrowLeft" => load_and_show(if reading_direction.get_untracked() { "next" } else { "last" }),
+                    "KeyF" => load_and_show("step_next"),
+                    "KeyD" => load_and_show("step_last"),
+                    "KeyO" => {
+                        load_and_show("pick_file");
+                    },
+                    "Minus" | "NumpadSubtract" => {
+                        let size_before = size.get_untracked();
+                        if size_before > 1 {
+                            let size_now = size_before - 1;
+                            set_size.set(size_now);
+                            load_and_show("refresh");
+                        }
+                    },
+                    "Equal" | "NumpadAdd" => {
+                        let size_before = size.get_untracked();
+                        let size_now = size_before + 1;
+                        set_size.set(size_now);
+                        load_and_show("refresh");
+                    },
+                    "KeyR" => {
+                        set_reading_direction.set(!reading_direction.get_untracked());
+                    },
+                    "KeyH" => {
+                        show_help();
+                    },
+                    "KeyP" => {
+                        show_prompt("abc");
+                    },
+                    #[cfg(debug_assertions)]
+                    "Pause" => {
+                        // spawn_local(async move {
+                        //     match serde_wasm_bindgen::from_value::<LoadPageResult>(invoke("error_test", JsValue::null()).await) {
+                        //         Ok(x) => {
+                        //             ()
+                        //         },
+                        //         Err(_) => {
+                        //             web_sys::console::log_1(&serde_wasm_bindgen::to_value("序列化失败了").unwrap());
+                        //         },
+                        //     }
+                        //     // let m = match r {
+                        //     //     Ok(()) => "yes",
+                        //     //     Err(LoadPageError::NeedPassword) => "NeedPassword",
+                        //     //     Err(LoadPageError::Other(_s)) => "other",
+                        //     // };
+                        //     // web_sys::console::log_1(&serde_wasm_bindgen::to_value(&m).unwrap());
+                        // });
+                        
+                    },
+                    x => {
+                        web_sys::console::log_1(&serde_wasm_bindgen::to_value(x).unwrap_or(JsValue::from_str("无法转为JsValue")));
+                    },
+                }
             }
         }) as Box<dyn FnMut(KeyboardEvent)>);
 
@@ -123,13 +212,14 @@ pub fn App() -> impl IntoView {
 
                 spawn_local(async move {
                     if let Some(path) = paths_array.into_iter().next() {
-                        let size = size.get();
+                        set_empty.set(false);
+                        let size = size.get_untracked();
                         let payload = CreateMangaPayload { path: path, count: size };
                         let args = serde_wasm_bindgen::to_value(&payload).unwrap();
                         let pages_path = invoke("create_manga", args).await;
-                        let mut resp: Vec<String> = serde_wasm_bindgen::from_value(pages_path).unwrap();
-                        resp.resize(size, String::new());
-                        set_img_data.set(resp);
+                        let mut paths: Vec<String> = serde_wasm_bindgen::from_value(pages_path).unwrap();
+                        paths.resize(size, String::new());
+                        set_img_data.set(paths);
                     }
                 });
                 
@@ -147,14 +237,14 @@ pub fn App() -> impl IntoView {
             on:mousedown=on_mousedown
             on:wheel=on_wheel
         >
-            <MultiImageViewer file_paths=img_data />
+            {move || {
+                    let v = img_data.get();
+                    let flag = reading_direction.get();
+                    view! { <MultiImageViewer file_paths=v reverse=flag /> }
+                }
+            }
         </div>
     }
-    // view! {
-    // <div style="background: red; width: 100%; height: 100vh; display: block;">
-    //     <h1 style="color: white; font-size: 40px;">"强制显示的测试文字"</h1>
-    // </div>
-    // }
 }
 
 #[derive(Deserialize)]
@@ -175,81 +265,32 @@ fn extract_paths_from_event(event: JsValue) -> Option<Vec<String>> {
 }
 
 #[component]
-pub fn MultiImageViewer(file_paths: ReadSignal<Vec<String>>) -> impl IntoView {
-    // 直接把 Vec<String> 映射成 Vec<ReadSignal<String>>
-    let (readers, set_readers) = signal(Vec::new());
-    let mut writers = Vec::new();
-    let (size, set_size) = signal(file_paths.get_untracked().len());
-    {
-        let file_paths = file_paths.get_untracked();
-        let mut readers_v = Vec::new();
-        for file_path in file_paths.into_iter() {
-            let (r, w) = signal(file_path);
-            readers_v.push(r);
-            writers.push(w);
-        }
-        set_readers.set(readers_v);
-    }
-
-    Effect::new(move |_| {
-        let mut size_now = size.get_untracked();
-        let file_paths = file_paths.get();
-        if size_now < file_paths.len() {
-            let mut readers_v = readers.get_untracked();
-            while size_now < file_paths.len() {
-                let (r, w) = signal(String::new());
-                readers_v.push(r);
-                writers.push(w);
-                size_now += 1;
-            }
-            set_size.set(size_now);
-            set_readers.set(readers_v);
-        } else if size_now > file_paths.len() {
-            set_size.set(file_paths.len());
-        }
-        for (i, file_path) in file_paths.into_iter().enumerate() {
-            writers[i].set(file_path);
-        }
-    });
-
+pub fn MultiImageViewer(file_paths: Vec<String>, reverse: bool) -> impl IntoView {
     view! {
-        <div class="row"
-            style="display:flex; height:100vh; width:100%; margin:0; padding:0;">
-            {move || {
-                (0..size.get())
-                    .map(|i| {
-                        let rs = readers.get_untracked();
-                        let r = rs[i];
-                        view! {
-                            <ImageViewer file_path=r />
-                        }
-                    })
-                    .collect_view()
-            }}
+        <div class="row" style="display:flex; height:100vh; width:100%;">
+            {
+                if reverse {
+                    file_paths.into_iter().rev().map(|src| view! { <ImageViewer file_path=src /> }).collect_view()
+                } else {
+                    file_paths.into_iter().map(|src| view! { <ImageViewer file_path=src /> }).collect_view()
+                }
+            }
         </div>
     }
 }
 
 #[component]
-pub fn ImageViewer(file_path: ReadSignal<String>) -> impl IntoView {
-    let (src, set_src) = signal(String::new());
-
-    Effect::new(move |_| {
-        let path = file_path.get();
-        spawn_local(async move {
-            if path.is_empty() {
-                set_src.set(String::from("public/no_data.svg"));
-            } else {
-                let mut url = convert_file_src(path.as_str());
-                url.push_str(format!("?t={}", js_sys::Date::now()).as_str());
-                set_src.set(url);
-            }
-        });
-    });
-
+pub fn ImageViewer(file_path: String) -> impl IntoView {
+    let file_path = if file_path.is_empty() {
+        String::from("public/no_data.svg")
+    } else {
+        let mut url = convert_file_src(file_path.as_str());
+        url.push_str(format!("?t={}", js_sys::Date::now()).as_str());
+        url
+    };
     view! {
         <div class="w-full h-full">
-            <img src=move || src.get()
+            <img src=file_path
                  style="width:100%; height:100%; object-fit:contain; display:block;"
                  class="pic"
             />
