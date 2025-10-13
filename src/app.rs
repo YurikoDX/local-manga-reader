@@ -44,18 +44,18 @@ pub fn App() -> impl IntoView {
     // });
 
     let (size, set_size) = signal(2_usize);
-    set_size.set(5);
     let (img_data, set_img_data) = signal(vec![String::new(); size.get_untracked()]);
+    let (reading_direction, set_reading_direction) = signal(true);
 
     // 通用：调用指定命令，返回 Vec<String> 并更新两张图
     let load_and_show = move |cmd: &'static str| {
         spawn_local(async move {
             let payload = PageTurnPayload { count: size.get_untracked() };
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-            let resp: Option<Vec<String>> =
+            let resp: (Vec<String>, u8) =
                 serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
-            if let Some(mut paths) = resp {
-                paths.resize(size.get(), String::new());
+            if let (mut paths, code) = resp {
+                paths.resize(size.get_untracked(), String::new());
                 set_img_data.set(paths);
             }
         })
@@ -84,34 +84,24 @@ pub fn App() -> impl IntoView {
         }
     };
 
-    Effect::new(move |_| {
-        let closure = Closure::wrap(Box::new(move |ev: KeyboardEvent| {
-            match ev.code().as_str() {
-                "ArrowRight" | "ArrowDown" | "KeyD" => load_and_show("next"),
-                "ArrowLeft" | "ArrowUp" | "KeyA" => load_and_show("last"),
-                "Minus" => {
-                    let size_before = size.get_untracked();
-                    let size_now = size_before - 1;
-                    set_size.set(size_now);
+    window_event_listener(ev::keydown, move |ev: KeyboardEvent| {
+        match ev.code().as_str() {
+            "ArrowRight" | "ArrowDown" | "KeyD" => load_and_show("next"),
+            "ArrowLeft" | "ArrowUp" | "KeyA" => load_and_show("last"),
+            "Minus" => {
+                let size_before = size.get_untracked();
+                if size_before > 1 {
+                    set_size.set(size_before - 1);
                     load_and_show("refresh");
-                },
-                "Equal" => {
-                    let size_before = size.get_untracked();
-                    let size_now = size_before + 1;
-                    set_size.set(size_now);
-                    load_and_show("refresh");
-                },
-                _ => {}
+                }
             }
-        }) as Box<dyn FnMut(KeyboardEvent)>);
-
-        // 绑定到 window
-        window()
-            .add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref())
-            .unwrap();
-
-        // 忘记闭包，让浏览器管理生命周期
-        closure.forget();
+            "Equal" => {
+                let size_before = size.get_untracked();
+                set_size.set(size_before + 1);
+                load_and_show("refresh");
+            }
+            _ => {}
+        }
     });
 
 
@@ -147,14 +137,14 @@ pub fn App() -> impl IntoView {
             on:mousedown=on_mousedown
             on:wheel=on_wheel
         >
-            <MultiImageViewer file_paths=img_data />
+            {move || {
+                    let v = img_data.get();
+                    let flag = reading_direction.get();
+                    view! { <MultiImageViewer file_paths=v reverse=flag /> }
+                }
+            }
         </div>
     }
-    // view! {
-    // <div style="background: red; width: 100%; height: 100vh; display: block;">
-    //     <h1 style="color: white; font-size: 40px;">"强制显示的测试文字"</h1>
-    // </div>
-    // }
 }
 
 #[derive(Deserialize)]
@@ -175,81 +165,32 @@ fn extract_paths_from_event(event: JsValue) -> Option<Vec<String>> {
 }
 
 #[component]
-pub fn MultiImageViewer(file_paths: ReadSignal<Vec<String>>) -> impl IntoView {
-    // 直接把 Vec<String> 映射成 Vec<ReadSignal<String>>
-    let (readers, set_readers) = signal(Vec::new());
-    let mut writers = Vec::new();
-    let (size, set_size) = signal(file_paths.get_untracked().len());
-    {
-        let file_paths = file_paths.get_untracked();
-        let mut readers_v = Vec::new();
-        for file_path in file_paths.into_iter() {
-            let (r, w) = signal(file_path);
-            readers_v.push(r);
-            writers.push(w);
-        }
-        set_readers.set(readers_v);
-    }
-
-    Effect::new(move |_| {
-        let mut size_now = size.get_untracked();
-        let file_paths = file_paths.get();
-        if size_now < file_paths.len() {
-            let mut readers_v = readers.get_untracked();
-            while size_now < file_paths.len() {
-                let (r, w) = signal(String::new());
-                readers_v.push(r);
-                writers.push(w);
-                size_now += 1;
-            }
-            set_size.set(size_now);
-            set_readers.set(readers_v);
-        } else if size_now > file_paths.len() {
-            set_size.set(file_paths.len());
-        }
-        for (i, file_path) in file_paths.into_iter().enumerate() {
-            writers[i].set(file_path);
-        }
-    });
-
+pub fn MultiImageViewer(file_paths: Vec<String>, reverse: bool) -> impl IntoView {
     view! {
-        <div class="row"
-            style="display:flex; height:100vh; width:100%; margin:0; padding:0;">
-            {move || {
-                (0..size.get())
-                    .map(|i| {
-                        let rs = readers.get_untracked();
-                        let r = rs[i];
-                        view! {
-                            <ImageViewer file_path=r />
-                        }
-                    })
-                    .collect_view()
-            }}
+        <div class="row" style="display:flex; height:100vh; width:100%;">
+            {
+                if reverse {
+                    file_paths.into_iter().rev().map(|src| view! { <ImageViewer file_path=src /> }).collect_view()
+                } else {
+                    file_paths.into_iter().map(|src| view! { <ImageViewer file_path=src /> }).collect_view()
+                }
+            }
         </div>
     }
 }
 
 #[component]
-pub fn ImageViewer(file_path: ReadSignal<String>) -> impl IntoView {
-    let (src, set_src) = signal(String::new());
-
-    Effect::new(move |_| {
-        let path = file_path.get();
-        spawn_local(async move {
-            if path.is_empty() {
-                set_src.set(String::from("public/no_data.svg"));
-            } else {
-                let mut url = convert_file_src(path.as_str());
-                url.push_str(format!("?t={}", js_sys::Date::now()).as_str());
-                set_src.set(url);
-            }
-        });
-    });
-
+pub fn ImageViewer(file_path: String) -> impl IntoView {
+    let file_path = if file_path.is_empty() {
+        String::from("public/no_data.svg")
+    } else {
+        let mut url = convert_file_src(file_path.as_str());
+        url.push_str(format!("?t={}", js_sys::Date::now()).as_str());
+        url
+    };
     view! {
         <div class="w-full h-full">
-            <img src=move || src.get()
+            <img src=file_path
                  style="width:100%; height:100%; object-fit:contain; display:block;"
                  class="pic"
             />
