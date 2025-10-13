@@ -1,11 +1,10 @@
 use leptos::task::spawn_local;
-use leptos::{ev::SubmitEvent, prelude::*};
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use leptos::*;
 // use tauri_sys::tauri;
-use web_sys::{Blob, Url, BlobPropertyBag, KeyboardEvent};
-use js_sys::{Uint8Array, Array, Object, Reflect};
+use web_sys::KeyboardEvent;
 
 #[wasm_bindgen]
 extern "C" {
@@ -30,51 +29,76 @@ struct PageTurnPayload {
     count: usize,
 }
 
+#[derive(Deserialize, Serialize)]
+struct TextPayload {
+    text: String,
+}
+
 use shared::LoadPageResult;
 
 #[component]
 pub fn App() -> impl IntoView {
-    // // 组件挂载后执行一次
-    // Effect::new(move |_| {
-    //     let closure = Closure::wrap(Box::new(|e: web_sys::MouseEvent| {
-    //         e.prevent_default();   // 关键：阻止默认菜单
-    //     }) as Box<dyn FnMut(_)>);
-
-    //     window()
-    //         .set_oncontextmenu(Some(closure.as_ref().unchecked_ref()));
-    //     closure.forget(); // 内存交给浏览器
-    // });
-
     let (size, set_size) = signal(2_usize);
     let (img_data, set_img_data) = signal(vec![String::new(); size.get_untracked()]);
     let (reading_direction, set_reading_direction) = signal(true);
+
+    let get_input = |prompt: &str| -> Option<String> {
+        if let Some(resp) = web_sys::window().and_then(|win| win.prompt_with_message(prompt).ok()) {
+            resp
+        } else {
+            Default::default()
+        }
+    };
 
     // 通用：调用指定命令，返回 Vec<String> 并更新两张图
     let load_and_show = move |cmd: &'static str| {
         spawn_local(async move {
             let payload = PageTurnPayload { count: size.get_untracked() };
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-            let resp: LoadPageResult =
-                serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
-            if let LoadPageResult::Success(mut paths) = resp {
-                paths.resize(size.get_untracked(), String::new());
-                set_img_data.set(paths);
+            let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
+            match resp {
+                LoadPageResult::Success(mut paths) => {
+                    paths.resize(size.get_untracked(), String::new());
+                    set_img_data.set(paths);
+                },
+                LoadPageResult::NeedPassword => {
+                    loop {
+                        let pwd = match get_input("请输入解压密码：") {
+                            Some(x) => x,
+                            None => break,
+                        };
+                        let payload = TextPayload { text: pwd };
+                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
+                        let _resp: bool = serde_wasm_bindgen::from_value(invoke("add_password", args).await).unwrap();
+                        let payload = PageTurnPayload { count: size.get_untracked() };
+                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
+                        let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
+                        match resp {
+                            LoadPageResult::Success(mut paths) => {
+                                paths.resize(size.get_untracked(), String::new());
+                                set_img_data.set(paths);
+                                break;
+                            },
+                            LoadPageResult::NeedPassword => {
+                                web_sys::window().and_then(|win| win.confirm_with_message("密码错误").ok());
+                            },
+                            LoadPageResult::Other(e) => {
+                                web_sys::window().and_then(|win| win.alert_with_message(format!("其他错误：{}", e).as_str()).ok());
+                            },
+                        }
+
+                    }
+                },
+                LoadPageResult::Other(e) => {
+                    web_sys::window().and_then(|win| win.alert_with_message(format!("错误：{}", e).as_str()).ok());
+                },
             }
         })
     };
 
-    // let get_input = |prompt: &str| -> String {
-    //     if let Some(Some(input)) = web_sys::window().and_then(|win| win.prompt_with_message(prompt).ok()) {
-    //         input
-    //     } else {
-    //         Default::default()
-    //     }
-    // };
-
     let on_mousedown = move |ev: leptos::ev::MouseEvent| {
         match ev.button() {
             0 => {
-                // 调 Tauri 命令
                 load_and_show("next");
             }
             2 => {
@@ -96,8 +120,22 @@ pub fn App() -> impl IntoView {
 
     window_event_listener(ev::keydown, move |ev: KeyboardEvent| {
         match ev.code().as_str() {
-            "ArrowRight" | "ArrowDown" | "KeyD" => load_and_show("next"),
-            "ArrowLeft" | "ArrowUp" | "KeyA" => load_and_show("last"),
+            "PageDown" | "ArrowDown" | "Space" => load_and_show("next"),
+            "PageUp" | "ArrowUp" => load_and_show("last"),
+            "ArrowRight" => load_and_show(
+                if reading_direction.get_untracked() {
+                    "last"
+                } else {
+                    "next"
+                }
+            ),
+            "ArrowLeft" => load_and_show(
+                if reading_direction.get_untracked() {
+                    "next"
+                } else {
+                    "last"
+                }
+            ),            
             "Minus" => {
                 let size_before = size.get_untracked();
                 if size_before > 1 {
@@ -110,6 +148,7 @@ pub fn App() -> impl IntoView {
                 set_size.set(size_before + 1);
                 load_and_show("refresh");
             },
+            "KeyR" => set_reading_direction.set(!reading_direction.get_untracked()),
             "KeyE" => {
                 spawn_local(async move {
 
@@ -122,12 +161,14 @@ pub fn App() -> impl IntoView {
                 });
                 
             },
-            // "KeyP" => {
-            //     // let pwd = get_input("请输入密码：");
-            //     let pwd = String::from("hello");
-            //     leptos::logging::log!("输入的密码是： {}", pwd);
-            // },
-            _ => {}
+            "KeyP" => {
+                let pwd = get_input("请输入密码：");
+                // let pwd = String::from("hello");
+                leptos::logging::log!("输入的密码是： {:?}", pwd);
+            },
+            x => {
+                leptos::logging::log!("ev.code() == {}", x);
+            }
         }
     });
 

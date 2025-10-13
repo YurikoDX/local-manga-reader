@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::collections::HashSet;
 
 use zip::{ZipArchive, read::ZipFile, result::ZipError::{self, *}};
 use sevenz_rust::SevenZReader;
@@ -17,6 +18,7 @@ use shared::NEED_PASSWORD;
 
 pub trait PageSource: Send + Sync {
     fn get_page(&mut self, index: usize) -> anyhow::Result<&Path>;
+    fn add_password(&mut self, pwd: Vec<u8>) -> bool;
     fn page_count(&self) -> usize;
 }
 
@@ -27,13 +29,17 @@ impl PageSource for NoSource {
         Ok(Path::new(""))
     }
 
+    fn add_password(&mut self, _pwd: Vec<u8>) -> bool {
+        false
+    }
+
     fn page_count(&self) -> usize {
         0
     }
 }
 
 pub struct ZippedSource {
-    passwords: Vec<String>,
+    passwords: HashSet<Vec<u8>>,
     zip_archive: ZipArchive<File>,
     cache_dir: PathBuf,
     caches: Vec<Option<PageCache>>,
@@ -51,6 +57,10 @@ impl PageSource for ZippedSource {
         }
     }
 
+    fn add_password(&mut self, pwd: Vec<u8>) -> bool {
+        self.passwords.insert(pwd)
+    }
+
     fn page_count(&self) -> usize {
         self.zip_archive.len()
     }
@@ -58,9 +68,7 @@ impl PageSource for ZippedSource {
 
 impl ZippedSource {
     pub fn new(file: File, cache_dir: impl AsRef<Path>) -> io::Result<Self> {
-        let passwords = vec![
-            String::from("123456"),
-        ];
+        let passwords = Default::default();
         let zip_archive = ZipArchive::new(file)?;
         let cache_dir = cache_dir.as_ref().to_path_buf();
         let caches: Vec<Option<PageCache>> = (0..zip_archive.len()).map(|_| None).collect();
@@ -117,10 +125,6 @@ impl ZippedSource {
         }
     }
 
-    pub fn add_password(&mut self, password: String) {
-        self.passwords.push(password);
-    }
-
     fn try_extract(&mut self, index: usize) -> anyhow::Result<FileBytes> {
         let file = self.zip_archive.by_index(index)?;
         Ok(Self::zip_file_to_bytes(file)?)
@@ -129,8 +133,10 @@ impl ZippedSource {
     fn try_extract_with_saved_passwords(&mut self, index: usize) -> anyhow::Result<FileBytes> {
         for pwd in self.passwords.iter() {
             dbg!(pwd);
-            if let Ok(file) = self.zip_archive.by_index_decrypt(index, pwd.as_bytes()) {
-                return Ok(Self::zip_file_to_bytes(file)?);
+            if let Ok(file) = self.zip_archive.by_index_decrypt(index, pwd.as_slice()) {
+                if let Ok(x) = Self::zip_file_to_bytes(file) {
+                    return Ok(x);
+                }
             }
         }
         Err(InvalidPassword)?

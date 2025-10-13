@@ -63,36 +63,35 @@ impl MangaBook {
 
     }
 
-    pub fn next_page(&mut self, count: usize) -> anyhow::Result<Vec<String>> {
+    pub fn next_page(&mut self, count: usize) {
         let len = self.source.page_count();
         if self.current_page + count < len {
             self.current_page += count;
         }
-        self.refresh(count)
     }
 
-    pub fn last_page(&mut self, count: usize) -> anyhow::Result<Vec<String>> {
+    pub fn last_page(&mut self, count: usize) {
         self.current_page = self.current_page.saturating_sub(count);
-        self.refresh(count)
     }
 
-    pub fn step_next_page(&mut self, count: usize) -> anyhow::Result<Vec<String>> {
+    pub fn step_next_page(&mut self, count: usize) {
         let len = self.source.page_count();
         if self.current_page + 1 < len {
             self.current_page += 1;
         }
-        self.refresh(count)
     }
 
-    pub fn step_last_page(&mut self, count: usize) -> anyhow::Result<Vec<String>> {
+    pub fn step_last_page(&mut self, count: usize) {
         self.current_page = self.current_page.saturating_sub(1);
-        self.refresh(count)
     }
 
-    pub fn jump_to(&mut self, index: usize, count: usize) -> anyhow::Result<Vec<String>> {
+    pub fn jump_to(&mut self, index: usize, count: usize) {
         self.previous_page = self.current_page;
         self.current_page = index;
-        self.refresh(count)
+    }
+
+    pub fn add_password(&mut self, pwd: String) -> bool {
+        self.source.add_password(pwd.into_bytes())
     }
 }
 
@@ -164,38 +163,56 @@ fn create_manga(path: &str, count: usize, app: AppHandle, state: State<Mutex<Man
 }
 
 #[tauri::command]
+fn add_password(text: String, state: State<Mutex<MangaBook>>) -> bool {
+    let mut manga_mut = state.lock().unwrap();
+    manga_mut.add_password(text)
+}
+
+#[tauri::command]
 fn next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     println!("next {} page", count);
-    let mut manga = state.lock().unwrap();
-    result_to_tuple(manga.next_page(count))
+    {
+        let mut manga = state.lock().unwrap();
+        manga.next_page(count);
+    }
+    refresh(count, state)
 }
 
 #[tauri::command]
 fn last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     println!("last {} page", count);
-    let mut manga = state.lock().unwrap();
-    result_to_tuple(manga.last_page(count))
+    {
+        let mut manga = state.lock().unwrap();
+        manga.last_page(count);
+    }
+    refresh(count, state)
 }
 
 #[tauri::command]
 fn step_next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     println!("step next {} page", count);
-    let mut manga = state.lock().unwrap();
-    result_to_tuple(manga.step_next_page(count))
+    {
+        let mut manga = state.lock().unwrap();
+        manga.step_next_page(count);
+    }
+    refresh(count, state)
 }
 
 #[tauri::command]
 fn step_last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     println!("step last {} page", count);
-    let mut manga = state.lock().unwrap();
-    result_to_tuple(manga.step_last_page(count))
+    {
+        let mut manga = state.lock().unwrap();
+        manga.step_last_page(count);
+    }
+    refresh(count, state)
 }
 
 #[tauri::command]
 fn refresh(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     println!("refresh {} page", count);
     let mut manga = state.lock().unwrap();
-    result_to_tuple(manga.refresh(count))
+    manga.refresh(count).into()
 }
 
 // #[tauri::command]
@@ -265,7 +282,7 @@ pub fn run() {
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, read_binary_file, create_manga, next, last, refresh, step_next, step_last, show_popup, error_test])
+        .invoke_handler(tauri::generate_handler![greet, read_binary_file, create_manga, next, last, refresh, step_next, step_last, show_popup, add_password, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

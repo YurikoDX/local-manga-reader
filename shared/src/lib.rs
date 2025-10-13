@@ -18,7 +18,7 @@ impl From<anyhow::Result<Vec<String>>> for LoadPageResult {
                 match e.downcast::<ZipError>() {
                     Ok(zip_error) => {
                         match zip_error {
-                            ZipError::UnsupportedArchive(NEED_PASSWORD) => LoadPageResult::NeedPassword,
+                            ZipError::InvalidPassword => LoadPageResult::NeedPassword,
                             e => LoadPageResult::Other(e.to_string()),
                         }
                     },
