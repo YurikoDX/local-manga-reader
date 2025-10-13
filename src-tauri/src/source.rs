@@ -8,7 +8,7 @@ use sevenz_rust::SevenZReader;
 
 pub type FileBytes = Vec<u8>;
 
-const NEED_PASSWORD: &str = "Password required to decrypt file";
+use shared::NEED_PASSWORD;
 
 // fn get_text_via_dialog() -> Option<String> {
 //     native_dialog::DialogBuilder::message()

@@ -2540,6 +2540,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sevenz-rust",
+ "shared",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -2556,6 +2557,7 @@ dependencies = [
  "leptos",
  "serde",
  "serde-wasm-bindgen",
+ "shared",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -4407,6 +4409,15 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shared"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "zip",
 ]
 
 [[package]]

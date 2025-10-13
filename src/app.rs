@@ -30,6 +30,8 @@ struct PageTurnPayload {
     count: usize,
 }
 
+use shared::LoadPageResult;
+
 #[component]
 pub fn App() -> impl IntoView {
     // // 组件挂载后执行一次
@@ -52,14 +54,22 @@ pub fn App() -> impl IntoView {
         spawn_local(async move {
             let payload = PageTurnPayload { count: size.get_untracked() };
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-            let resp: (Vec<String>, u8) =
+            let resp: LoadPageResult =
                 serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
-            if let (mut paths, code) = resp {
+            if let LoadPageResult::Success(mut paths) = resp {
                 paths.resize(size.get_untracked(), String::new());
                 set_img_data.set(paths);
             }
         })
     };
+
+    // let get_input = |prompt: &str| -> String {
+    //     if let Some(Some(input)) = web_sys::window().and_then(|win| win.prompt_with_message(prompt).ok()) {
+    //         input
+    //     } else {
+    //         Default::default()
+    //     }
+    // };
 
     let on_mousedown = move |ev: leptos::ev::MouseEvent| {
         match ev.button() {
@@ -99,7 +109,24 @@ pub fn App() -> impl IntoView {
                 let size_before = size.get_untracked();
                 set_size.set(size_before + 1);
                 load_and_show("refresh");
-            }
+            },
+            "KeyE" => {
+                spawn_local(async move {
+
+                    let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke("error_test", JsValue::null()).await).unwrap();
+                    match resp {
+                        LoadPageResult::Success(x) => leptos::logging::log!("Success: {:?}", x),
+                        LoadPageResult::Other(e) => leptos::logging::log!("error code: {}", e),
+                        LoadPageResult::NeedPassword => leptos::logging::log!("Need password."),
+                    }
+                });
+                
+            },
+            // "KeyP" => {
+            //     // let pwd = get_input("请输入密码：");
+            //     let pwd = String::from("hello");
+            //     leptos::logging::log!("输入的密码是： {}", pwd);
+            // },
             _ => {}
         }
     });
@@ -113,16 +140,19 @@ pub fn App() -> impl IntoView {
 
                 spawn_local(async move {
                     if let Some(path) = paths_array.into_iter().next() {
-                        let size = size.get();
+                        let size = size.get_untracked();
                         let payload = CreateMangaPayload { path: path, count: size };
                         let args = serde_wasm_bindgen::to_value(&payload).unwrap();
                         let pages_path = invoke("create_manga", args).await;
-                        let mut resp: Vec<String> = serde_wasm_bindgen::from_value(pages_path).unwrap();
-                        resp.resize(size, String::new());
-                        set_img_data.set(resp);
+                        let resp: bool = serde_wasm_bindgen::from_value(pages_path).unwrap();
+                        if resp {
+                            load_and_show("refresh");
+                        } else {
+                            todo!();
+                        }
                     }
                 });
-                
+
             }
         }) as Box<dyn FnMut(JsValue)>);
 

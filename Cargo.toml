@@ -13,6 +13,7 @@ serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1.7"
 web-sys = { version = "0.3", features = ["Blob", "Url", "BlobPropertyBag"] }
+shared = { path = "./shared" }
 
 [workspace]
-members = ["src-tauri"]
+members = [ "shared", "src-tauri"]

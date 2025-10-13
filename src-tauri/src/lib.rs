@@ -10,8 +10,9 @@ use std::fmt;
 mod source;
 use source::{PageSource, NoSource, PageCache, ZippedSource};
 
-pub type LoadPageResult = (Vec<String>, u8);
+// pub type LoadPageResult = (Vec<String>, u8);
 
+use shared::LoadPageResult;
 // pub struct LoadPageResult(Vec<String>, u8);
 
 // impl From<anyhow::Result<Vec<String>>> for LoadPageResult {
@@ -97,8 +98,8 @@ impl MangaBook {
 
 fn result_to_tuple(r: anyhow::Result<Vec<String>>) -> LoadPageResult {
     match r {
-        Ok(x) => (x, 0),
-        Err(e) => (vec![], 1),
+        Ok(x) => LoadPageResult::Success(x),
+        Err(e) => LoadPageResult::Other(e.to_string()),
     }
 }
 
@@ -145,7 +146,7 @@ fn try_create_manga(path: &str, cache_dir: PathBuf) -> anyhow::Result<MangaBook>
 
 
 #[tauri::command]
-fn create_manga(path: &str, count: usize, app: AppHandle, state: State<Mutex<MangaBook>>) -> LoadPageResult {
+fn create_manga(path: &str, count: usize, app: AppHandle, state: State<Mutex<MangaBook>>) -> bool {
     let cache_dir = app.path().resolve("cache", tauri::path::BaseDirectory::AppData).unwrap();
     
     match try_create_manga(path, cache_dir) {
@@ -154,11 +155,10 @@ fn create_manga(path: &str, count: usize, app: AppHandle, state: State<Mutex<Man
                 let mut manga_mut = state.lock().unwrap();
                 *manga_mut = manga;
             }
-            refresh(count, state)
+            true
         },
         Err(e) => {
-            dbg!(e);
-            panic!();
+            false
         },
     }
 }
@@ -229,12 +229,10 @@ fn show_popup(app: tauri::AppHandle, text: String) -> Result<(), String> {
     Ok(())
 }
 
-
-// #[tauri::command]
-// fn error_test() -> Result<(), LoadPageError> {
-//     Err(LoadPageError::NeedPassword)
-// }
-
+#[tauri::command]
+fn error_test() -> LoadPageResult {
+    LoadPageResult::Other(String::from("This is an error."))
+}
 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -267,7 +265,7 @@ pub fn run() {
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, read_binary_file, create_manga, next, last, refresh, step_next, step_last, show_popup])
+        .invoke_handler(tauri::generate_handler![greet, read_binary_file, create_manga, next, last, refresh, step_next, step_last, show_popup, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
