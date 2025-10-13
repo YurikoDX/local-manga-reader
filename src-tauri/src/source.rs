@@ -11,6 +11,19 @@ pub type FileBytes = Vec<u8>;
 
 use shared::NEED_PASSWORD;
 
+lazy_static::lazy_static! {
+    static ref SUPPORTED_FORMATS: std::collections::HashSet<&'static str> = [
+        "jpg",
+        "jpeg",
+        "png",
+        "bmp",
+        "gif",
+        "webp",
+        "tiff",
+        "svg",
+    ].into_iter().collect();
+}
+
 // fn get_text_via_dialog() -> Option<String> {
 //     native_dialog::DialogBuilder::message()
 //         .
@@ -43,17 +56,22 @@ pub struct ZippedSource {
     zip_archive: ZipArchive<File>,
     cache_dir: PathBuf,
     caches: Vec<Option<PageCache>>,
+    indice_table: Vec<usize>,
 }
     
 impl PageSource for ZippedSource {
     fn get_page(&mut self, index: usize) -> anyhow::Result<&Path> {
+        if index >= self.page_count() {
+            // 索引出界
+            return Ok(Path::new(""));
+        }
+        let index = self.indice_table[index];
         self.cache(index)?;
         if let Some(x) = self.caches.get(index) {
             let page_cache = x.as_ref().unwrap();
             Ok(page_cache.get_path())
         } else {
-            // 索引出界
-            Ok(Path::new(""))
+            unreachable!();
         }
     }
 
@@ -62,7 +80,7 @@ impl PageSource for ZippedSource {
     }
 
     fn page_count(&self) -> usize {
-        self.zip_archive.len()
+        self.indice_table.len()
     }
 }
 
@@ -71,12 +89,25 @@ impl ZippedSource {
         let passwords = Default::default();
         let zip_archive = ZipArchive::new(file)?;
         let cache_dir = cache_dir.as_ref().to_path_buf();
-        let caches: Vec<Option<PageCache>> = (0..zip_archive.len()).map(|_| None).collect();
+        let indice_table = {
+            let file_names: Vec<&str> = zip_archive.file_names().collect();
+            let mut indice_table: Vec<usize> = (0..zip_archive.len()).collect();
+            indice_table.retain(|&index| {
+                let file_name = file_names[index];
+                let ext = Path::new(file_name).extension().unwrap_or_default().to_str().unwrap_or_default().to_ascii_lowercase();
+                SUPPORTED_FORMATS.contains(ext.as_str())
+            });
+            indice_table.sort_by_key(|&index| file_names[index]);
+            indice_table
+        };
+
+        let caches: Vec<Option<PageCache>> = (0..indice_table.len()).map(|_| None).collect();
         Ok(Self { 
             passwords,
             zip_archive,
             cache_dir,
             caches,
+            indice_table,
         })
     }
 

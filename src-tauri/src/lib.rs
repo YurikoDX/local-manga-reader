@@ -13,6 +13,7 @@ use source::{PageSource, NoSource, PageCache, ZippedSource};
 // pub type LoadPageResult = (Vec<String>, u8);
 
 use shared::LoadPageResult;
+
 // pub struct LoadPageResult(Vec<String>, u8);
 
 // impl From<anyhow::Result<Vec<String>>> for LoadPageResult {
@@ -145,7 +146,7 @@ fn try_create_manga(path: &str, cache_dir: PathBuf) -> anyhow::Result<MangaBook>
 
 
 #[tauri::command]
-fn create_manga(path: &str, count: usize, app: AppHandle, state: State<Mutex<MangaBook>>) -> bool {
+fn create_manga(path: &str, app: AppHandle, state: State<Mutex<MangaBook>>) -> bool {
     let cache_dir = app.path().resolve("cache", tauri::path::BaseDirectory::AppData).unwrap();
     
     match try_create_manga(path, cache_dir) {
@@ -215,25 +216,21 @@ fn refresh(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     manga.refresh(count).into()
 }
 
-// #[tauri::command]
-// fn pick_file(count: usize, app: tauri::AppHandle, state: State<Mutex<MangaBook>>) -> Vec<String> {
-//     let window = app.get_webview_window("main").unwrap();
-//     window.hide().unwrap();
+#[tauri::command]
+fn pick_file(app: tauri::AppHandle) -> Option<String> {
+    let window = app.get_webview_window("main").unwrap();
+    window.hide().unwrap();
 
-//     let path = app
-//         .dialog()
-//         .file()
-//         .set_title("选择漫画")
-//         .add_filter("压缩文件", &["zip"])
-//         .blocking_pick_file();
-//     window.show().unwrap();
+    let path = app
+        .dialog()
+        .file()
+        .set_title("选择漫画")
+        .add_filter("压缩文件", &["zip"])
+        .blocking_pick_file();
+    window.show().unwrap();
 
-//     if let Some(p) = path {
-//         create_manga(p.to_string().as_str(), count, app, state)
-//     } else {
-//         panic!()
-//     }
-// }
+    path.map(|p| p.to_string())
+}
 
 #[tauri::command]
 fn show_popup(app: tauri::AppHandle, text: String) -> Result<(), String> {
@@ -257,6 +254,8 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             use tauri::WindowEvent;
+            // use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent};
+            // use global_hotkey::HotKeyState;
 
             let main_win = app.get_webview_window("main").unwrap(); // 主窗口 label=main
             let app_handle = app.handle().clone();
@@ -277,12 +276,40 @@ pub fn run() {
                     _ => {}
                 }
             });
+
+            
+            #[cfg(desktop)]
+            {
+                use tauri::Manager;
+                use tauri_plugin_global_shortcut::{Code, Modifiers, ShortcutState};
+
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_shortcuts(["insert"])?
+                        .with_handler(|app, shortcut, event| {
+                            if event.state == ShortcutState::Pressed  {
+                                if shortcut.matches(Modifiers::empty(), Code::Insert) {
+                                    // let _ = app.emit("shortcut-event", "Ctrl+D triggered");
+                                    let window = app.get_webview_window("main").unwrap();
+                                    if window.is_visible().unwrap() {
+                                        window.hide().unwrap();
+                                    } else {
+                                        window.show().unwrap();
+                                    }
+                                    
+                                }
+                            }
+                        })
+                        .build(),
+                )?;
+            }
+
             Ok(())
         })
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, read_binary_file, create_manga, next, last, refresh, step_next, step_last, show_popup, add_password, error_test])
+        .invoke_handler(tauri::generate_handler![greet, read_binary_file, create_manga, next, last, refresh, step_next, step_last, show_popup, add_password, pick_file, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

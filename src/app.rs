@@ -21,7 +21,6 @@ extern "C" {
 #[derive(Deserialize, Serialize)]
 struct CreateMangaPayload {
     path: String,
-    count: usize,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -41,6 +40,7 @@ pub fn App() -> impl IntoView {
     let (size, set_size) = signal(2_usize);
     let (img_data, set_img_data) = signal(vec![String::new(); size.get_untracked()]);
     let (reading_direction, set_reading_direction) = signal(true);
+    let (empty_manga, set_empty_manga) = signal(true);
 
     let get_input = |prompt: &str| -> Option<String> {
         if let Some(resp) = web_sys::window().and_then(|win| win.prompt_with_message(prompt).ok()) {
@@ -96,15 +96,43 @@ pub fn App() -> impl IntoView {
         })
     };
 
+    let create_manga = move |path: String| {
+        spawn_local(async move {
+            let payload = CreateMangaPayload { path: path };
+            let args = serde_wasm_bindgen::to_value(&payload).unwrap();
+            let pages_path = invoke("create_manga", args).await;
+            let resp: bool = serde_wasm_bindgen::from_value(pages_path).unwrap();
+            if resp {
+                load_and_show("refresh");
+                set_empty_manga.set(false);
+            } else {
+                todo!();
+            }
+        });
+    };
+
+    let pick_manga = move || {
+        spawn_local(async move {
+            let resp: Option<String> = serde_wasm_bindgen::from_value(invoke("pick_file", JsValue::null()).await).unwrap();
+            if let Some(path) = resp {
+                create_manga(path);
+            }
+        });
+    };
+
     let on_mousedown = move |ev: leptos::ev::MouseEvent| {
-        match ev.button() {
-            0 => {
-                load_and_show("next");
+        if empty_manga.get_untracked() {
+            pick_manga();
+        } else {
+            match ev.button() {
+                0 => {
+                    load_and_show("next");
+                }
+                2 => {
+                    load_and_show("last");
+                }
+                _ => {}
             }
-            2 => {
-                load_and_show("last");
-            }
-            _ => {}
         }
     };
 
@@ -149,6 +177,7 @@ pub fn App() -> impl IntoView {
                 load_and_show("refresh");
             },
             "KeyR" => set_reading_direction.set(!reading_direction.get_untracked()),
+            "KeyO" => pick_manga(),
             "KeyE" => {
                 spawn_local(async move {
 
@@ -178,22 +207,9 @@ pub fn App() -> impl IntoView {
         let closure = Closure::wrap(Box::new(move |event: JsValue| {
             // 直接提取 event.payload.paths
             if let Some(paths_array) = extract_paths_from_event(event) {
-
-                spawn_local(async move {
-                    if let Some(path) = paths_array.into_iter().next() {
-                        let size = size.get_untracked();
-                        let payload = CreateMangaPayload { path: path, count: size };
-                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-                        let pages_path = invoke("create_manga", args).await;
-                        let resp: bool = serde_wasm_bindgen::from_value(pages_path).unwrap();
-                        if resp {
-                            load_and_show("refresh");
-                        } else {
-                            todo!();
-                        }
-                    }
-                });
-
+                if let Some(path) = paths_array.into_iter().nth(0) {
+                    create_manga(path);
+                }
             }
         }) as Box<dyn FnMut(JsValue)>);
 
