@@ -61,7 +61,6 @@ impl MangaBook {
 
         let source = Box::new(ZippedSource::new(file, cache_dir)?);
         Ok(Self { source, current_page: 0, previous_page: 0 })
-
     }
 
     pub fn next_page(&mut self, count: usize) {
@@ -86,9 +85,15 @@ impl MangaBook {
         self.current_page = self.current_page.saturating_sub(1);
     }
 
+    pub fn len(&self) -> usize {
+        self.source.page_count()
+    }
+
     pub fn jump_to(&mut self, index: usize, count: usize) {
+        let len = self.source.page_count();
         self.previous_page = self.current_page;
-        self.current_page = index;
+        let target = len.saturating_sub(count).min(index);
+        self.current_page = target;
     }
 
     pub fn add_password(&mut self, pwd: String) -> bool {
@@ -116,29 +121,6 @@ fn read_binary_file(path: &str, app: AppHandle) -> Vec<u8> {
     std::fs::read(path).unwrap()
 }
 
-// fn try_create_manga(path: &str, count: usize, cache_dir: PathBuf) -> anyhow::Result<(MangaBook, Vec<String>)> {
-//     let mut manga = MangaBook::new(path, cache_dir)?;
-//     let pages = manga.jump_to(0, count)?;
-//     Ok((manga, pages))
-// }
-
-// #[tauri::command]
-// fn create_manga(path: &str, count: usize, app: AppHandle, state: State<Mutex<MangaBook>>) -> Vec<String> {
-//     let cache_dir = app.path().resolve("cache", tauri::path::BaseDirectory::AppData).unwrap();
-    
-//     match try_create_manga(path, count, cache_dir) {
-//         Ok((manga, pages)) => {
-//             let mut manga_mut = state.lock().unwrap();
-//             *manga_mut = manga;
-//             pages
-//         },
-//         Err(e) => {
-//             dbg!(e);
-//             panic!();
-//         },
-//     }
-// }
-
 fn try_create_manga(path: &str, cache_dir: PathBuf) -> anyhow::Result<MangaBook> {
     let manga = MangaBook::new(path, cache_dir)?;
     Ok(manga)
@@ -146,19 +128,19 @@ fn try_create_manga(path: &str, cache_dir: PathBuf) -> anyhow::Result<MangaBook>
 
 
 #[tauri::command]
-fn create_manga(path: &str, app: AppHandle, state: State<Mutex<MangaBook>>) -> bool {
+fn create_manga(path: &str, app: AppHandle, state: State<Mutex<MangaBook>>) -> usize {
     let cache_dir = app.path().resolve("cache", tauri::path::BaseDirectory::AppData).unwrap();
     
-    match try_create_manga(path, cache_dir) {
+    match MangaBook::new(path, cache_dir) {
         Ok(manga) => {
-            {
-                let mut manga_mut = state.lock().unwrap();
-                *manga_mut = manga;
-            }
-            true
+
+            let mut manga_mut = state.lock().unwrap();
+            *manga_mut = manga;
+            manga_mut.len()
+
         },
         Err(e) => {
-            false
+            0
         },
     }
 }
@@ -207,6 +189,35 @@ fn step_last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
         manga.step_last_page(count);
     }
     refresh(count, state)
+}
+
+#[tauri::command]
+fn home(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
+    println!("home {} page", count);
+    let index = 0;
+    jump_to(index, count, state.clone());
+    refresh(count, state)
+}
+
+#[tauri::command]
+fn end(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
+    println!("end {} page", count);
+    let index = usize::MAX;
+    jump_to(index, count, state.clone());
+    refresh(count, state)
+}
+
+#[tauri::command]
+fn page_count(state: State<Mutex<MangaBook>>) -> usize {
+    state.lock().unwrap().len()
+}
+
+#[tauri::command]
+fn jump_to(index: usize, count: usize, state: State<Mutex<MangaBook>>) {
+    println!("jump to page {} with {} page", index, count);
+    
+    let mut manga = state.lock().unwrap();
+    manga.jump_to(index, count);
 }
 
 #[tauri::command]
@@ -309,7 +320,7 @@ pub fn run() {
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, read_binary_file, create_manga, next, last, refresh, step_next, step_last, show_popup, add_password, pick_file, error_test])
+        .invoke_handler(tauri::generate_handler![greet, read_binary_file, create_manga, next, last, refresh, step_next, step_last, show_popup, add_password, pick_file, jump_to, page_count, home, end, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

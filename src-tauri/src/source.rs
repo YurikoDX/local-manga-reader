@@ -24,10 +24,31 @@ lazy_static::lazy_static! {
     ].into_iter().collect();
 }
 
-// fn get_text_via_dialog() -> Option<String> {
-//     native_dialog::DialogBuilder::message()
-//         .
-// }
+pub struct PageCache {
+    path: PathBuf,
+}
+
+impl PageCache {
+    pub fn new(content: impl AsRef<[u8]>, path: impl AsRef<Path>) -> io::Result<Self> {
+        let mut file = File::create(path.as_ref())?;
+        file.write_all(content.as_ref())?;
+        let path = path.as_ref().to_path_buf();
+        Ok(Self { path })
+    }
+
+    pub fn get_path(&self) -> &Path {
+        self.path.as_path()
+    }
+}
+
+impl Drop for PageCache {
+    fn drop(&mut self) {
+        println!("dropping {}", self.path.to_string_lossy());
+        if let Err(e) = std::fs::remove_file(self.path.as_path()) {
+            println!("Error removing page cache: {}", e);
+        }
+    }
+}
 
 pub trait PageSource: Send + Sync {
     fn get_page(&mut self, index: usize) -> anyhow::Result<&Path>;
@@ -50,6 +71,8 @@ impl PageSource for NoSource {
         0
     }
 }
+
+
 
 pub struct ZippedSource {
     passwords: HashSet<Vec<u8>>,
@@ -190,29 +213,3 @@ impl ZippedSource {
 //         self.zip_archive.len()
 //     }
 // }
-
-pub struct PageCache {
-    path: PathBuf,
-}
-
-impl PageCache {
-    pub fn new(content: impl AsRef<[u8]>, path: impl AsRef<Path>) -> io::Result<Self> {
-        let mut file = File::create(path.as_ref())?;
-        file.write_all(content.as_ref())?;
-        let path = path.as_ref().to_path_buf();
-        Ok(Self { path })
-    }
-
-    pub fn get_path(&self) -> &Path {
-        self.path.as_path()
-    }
-}
-
-impl Drop for PageCache {
-    fn drop(&mut self) {
-        println!("dropping {}", self.path.to_string_lossy());
-        if let Err(e) = std::fs::remove_file(self.path.as_path()) {
-            println!("Error removing page cache: {}", e);
-        }
-    }
-}

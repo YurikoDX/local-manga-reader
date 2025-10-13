@@ -29,6 +29,12 @@ struct PageTurnPayload {
 }
 
 #[derive(Deserialize, Serialize)]
+struct JumpPagePayload {
+    index: usize,
+    count: usize,
+}
+
+#[derive(Deserialize, Serialize)]
 struct TextPayload {
     text: String,
 }
@@ -41,6 +47,7 @@ pub fn App() -> impl IntoView {
     let (img_data, set_img_data) = signal(vec![String::new(); size.get_untracked()]);
     let (reading_direction, set_reading_direction) = signal(true);
     let (empty_manga, set_empty_manga) = signal(true);
+    let (page_count, set_page_count) = signal(0_usize);
 
     let get_input = |prompt: &str| -> Option<String> {
         if let Some(resp) = web_sys::window().and_then(|win| win.prompt_with_message(prompt).ok()) {
@@ -101,8 +108,9 @@ pub fn App() -> impl IntoView {
             let payload = CreateMangaPayload { path: path };
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
             let pages_path = invoke("create_manga", args).await;
-            let resp: bool = serde_wasm_bindgen::from_value(pages_path).unwrap();
-            if resp {
+            let resp: usize = serde_wasm_bindgen::from_value(pages_path).unwrap();
+            if resp > 0 {
+                set_page_count.set(resp);
                 load_and_show("refresh");
                 set_empty_manga.set(false);
             } else {
@@ -118,6 +126,32 @@ pub fn App() -> impl IntoView {
                 create_manga(path);
             }
         });
+    };
+
+    let jump = move || {
+        let prompt = format!("请输入目标页码（共 {} 页）：", page_count.get_untracked());
+        if let Some(mut page_index_s) = get_input(prompt.as_str()) {
+            let page_index_s: String = page_index_s.chars().filter(|x| '0' <= *x && *x <= '9').collect();
+            if page_index_s.is_empty() {
+
+            } else {
+                if let Ok(index) = page_index_s.parse::<usize>() {
+                    let count = size.get_untracked();
+                    spawn_local(async move {
+                        let payload = JumpPagePayload { index, count };
+                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
+                        let _: () = serde_wasm_bindgen::from_value(invoke("jump_to", args).await).unwrap();
+                        load_and_show("refresh");
+                    });
+
+                } else {
+
+                }
+
+            }
+
+        }
+
     };
 
     let on_mousedown = move |ev: leptos::ev::MouseEvent| {
@@ -148,39 +182,41 @@ pub fn App() -> impl IntoView {
 
     window_event_listener(ev::keydown, move |ev: KeyboardEvent| {
         match ev.code().as_str() {
-            "PageDown" | "ArrowDown" | "Space" => load_and_show("next"),
-            "PageUp" | "ArrowUp" => load_and_show("last"),
-            "ArrowRight" => load_and_show(
+            "PageDown" | "ArrowDown" | "Space" | "Numpad2" => load_and_show("next"),
+            "PageUp" | "ArrowUp" | "Numpad8" => load_and_show("last"),
+            "ArrowRight" | "Numpad6" => load_and_show(
                 if reading_direction.get_untracked() {
                     "last"
                 } else {
                     "next"
                 }
             ),
-            "ArrowLeft" => load_and_show(
+            "ArrowLeft" | "Numpad4" => load_and_show(
                 if reading_direction.get_untracked() {
                     "next"
                 } else {
                     "last"
                 }
-            ),            
-            "Minus" => {
+            ),
+            "Home" => load_and_show("home"),
+            "End" => load_and_show("end"),
+            "Minus" | "NumpadSubtract" => {
                 let size_before = size.get_untracked();
                 if size_before > 1 {
                     set_size.set(size_before - 1);
                     load_and_show("refresh");
                 }
             }
-            "Equal" => {
+            "Equal" | "NumpadAdd" => {
                 let size_before = size.get_untracked();
                 set_size.set(size_before + 1);
                 load_and_show("refresh");
             },
             "KeyR" => set_reading_direction.set(!reading_direction.get_untracked()),
             "KeyO" => pick_manga(),
+            "KeyJ" => jump(),
             "KeyE" => {
                 spawn_local(async move {
-
                     let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke("error_test", JsValue::null()).await).unwrap();
                     match resp {
                         LoadPageResult::Success(x) => leptos::logging::log!("Success: {:?}", x),
