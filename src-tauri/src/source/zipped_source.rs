@@ -30,6 +30,9 @@ impl PageSource for ZippedSource {
             let page_cache = x.as_ref().unwrap();
             Ok(page_cache.get_path())
         } else {
+            dbg!(index);
+            dbg!(&self.indice_table);
+            dbg!(self.caches.len());
             unreachable!();
         }
     }
@@ -61,7 +64,7 @@ impl ZippedSource {
             indice_table
         };
 
-        let caches: Vec<Option<PageCache>> = (0..indice_table.len()).map(|_| None).collect();
+        let caches: Vec<Option<PageCache>> = (0..=indice_table.iter().max().copied().unwrap_or(0)).map(|_| None).collect();
         Ok(Self { 
             passwords,
             zip_archive,
@@ -84,6 +87,19 @@ impl ZippedSource {
         };
         self.caches[index] = Some(page_cache);
         Ok(())
+    }
+
+    pub fn rebuild_indice_table(&mut self, img_paths: &[&Path]) {
+        self.indice_table.clear();
+        self.caches.clear();
+        let mut indice_table = Vec::with_capacity(300);
+        for &path in img_paths.iter() {
+            let index = self.zip_archive.index_for_path(path).unwrap_or(usize::MAX);
+            indice_table.push(index);
+        }
+        let caches: Vec<Option<PageCache>> = (0..=indice_table.iter().max().copied().unwrap_or(0)).map(|_| None).collect();
+        self.caches = caches;
+        self.indice_table = indice_table;
     }
 
     fn cache(&mut self, index: usize) -> anyhow::Result<()> {

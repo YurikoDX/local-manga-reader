@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 mod zipped_source;
 use zipped_source::ZippedSource;
 
+mod epub_source;
+use epub_source::EpubSource;
+
 pub type FileBytes = Vec<u8>;
 
 lazy_static::lazy_static! {
@@ -83,6 +86,7 @@ impl TryFrom<&Path> for Box<dyn PageSource> {
                 Some(ext) => match ext.to_str() {
                     Some(ext) => match ext.to_ascii_lowercase().as_str() {
                         "zip" => Ok(Box::new(ZippedSource::new(path)?)),
+                        "epub" => Ok(Box::new(EpubSource::new(path)?)),
                         _ => Err(anyhow::anyhow!("不支持的文件格式")),
                     }
                     None => Err(anyhow::anyhow!("非法的后缀名")),
