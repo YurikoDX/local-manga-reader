@@ -1,29 +1,13 @@
-use tauri::{AppHandle, Manager, Builder, State, Emitter};
-use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager, State};
+use std::path::Path;
 use tauri_plugin_dialog::DialogExt;
 
-use std::{fs::File, io::{self, Write, Read}};
 use std::sync::Mutex;
-use serde::{Serialize, Serializer, Deserialize, Deserializer, de::{self, MapAccess, Visitor}};
-use std::fmt;
 
 mod source;
-use source::{PageSource, NoSource, PageCache, ZippedSource};
+use source::{PageSource, NoSource};
 
-// pub type LoadPageResult = (Vec<String>, u8);
-
-use shared::LoadPageResult;
-
-// pub struct LoadPageResult(Vec<String>, u8);
-
-// impl From<anyhow::Result<Vec<String>>> for LoadPageResult {
-//     fn from(value: anyhow::Result<Vec<String>>) -> Self {
-//         match value {
-//             Ok(x) => LoadPageResult(x, 0),
-//             Err(e) => LoadPageResult(vec![], 1),
-//         }
-//     }
-// }
+use shared::{CreateMangaResult, LoadPageResult};
 
 struct MangaBook {
     source: Box<dyn PageSource>,
@@ -42,6 +26,10 @@ impl Default for MangaBook {
 }
 
 impl MangaBook {
+    pub fn new(source: Box<dyn PageSource>) -> Self {
+        Self { source, ..Default::default() }
+    }
+
     fn get_page_path(&mut self, index: usize) -> anyhow::Result<String> {
         Ok(self.source.get_page(index)?.to_string_lossy().to_string())
     }
@@ -55,14 +43,6 @@ impl MangaBook {
         Ok(pages)
     }
 
-    pub fn new(path: &str, cache_dir: impl AsRef<Path>) -> io::Result<Self> {
-        let file = File::open(path)?;
-        std::fs::create_dir_all(cache_dir.as_ref())?;
-
-        let source = Box::new(ZippedSource::new(file, cache_dir)?);
-        Ok(Self { source, current_page: 0, previous_page: 0 })
-    }
-
     pub fn next_page(&mut self, count: usize) {
         let len = self.source.page_count();
         if self.current_page + count < len {
@@ -74,14 +54,14 @@ impl MangaBook {
         self.current_page = self.current_page.saturating_sub(count);
     }
 
-    pub fn step_next_page(&mut self, count: usize) {
+    pub fn step_next_page(&mut self) {
         let len = self.source.page_count();
         if self.current_page + 1 < len {
             self.current_page += 1;
         }
     }
 
-    pub fn step_last_page(&mut self, count: usize) {
+    pub fn step_last_page(&mut self) {
         self.current_page = self.current_page.saturating_sub(1);
     }
 
@@ -101,48 +81,27 @@ impl MangaBook {
     }
 }
 
-fn result_to_tuple(r: anyhow::Result<Vec<String>>) -> LoadPageResult {
-    match r {
-        Ok(x) => LoadPageResult::Success(x),
-        Err(e) => LoadPageResult::Other(e.to_string()),
-    }
-}
-
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-#[tauri::command]
-fn read_binary_file(path: &str, app: AppHandle) -> Vec<u8> {
-    // let app_dir = app.path().resolve("", tauri::path::BaseDirectory::AppData).unwrap();
-    // println!("APP DATA DIR = {}", app_dir.display());
-    std::fs::read(path).unwrap()
+fn try_create_manga(path: &str, app: AppHandle, state: State<Mutex<MangaBook>>) -> anyhow::Result<usize> {
+    let path = Path::new(path);
+    let mut source: Box<dyn PageSource> = path.try_into()?;
+    let page_count = source.page_count();
+    let cache_dir = app.path().resolve("cache", tauri::path::BaseDirectory::AppData)?;
+    std::fs::create_dir_all(cache_dir.as_path())?;
+    source.set_cache_dir(cache_dir);
+    let new_manga = MangaBook::new(source);
+    *state.lock().map_err(|e| anyhow::anyhow!("锁中毒: {}", e))? = new_manga;
+    Ok(page_count)
 }
 
-fn try_create_manga(path: &str, cache_dir: PathBuf) -> anyhow::Result<MangaBook> {
-    let manga = MangaBook::new(path, cache_dir)?;
-    Ok(manga)
-}
-
-
 #[tauri::command]
-fn create_manga(path: &str, app: AppHandle, state: State<Mutex<MangaBook>>) -> usize {
-    let cache_dir = app.path().resolve("cache", tauri::path::BaseDirectory::AppData).unwrap();
-    
-    match MangaBook::new(path, cache_dir) {
-        Ok(manga) => {
-
-            let mut manga_mut = state.lock().unwrap();
-            *manga_mut = manga;
-            manga_mut.len()
-
-        },
-        Err(e) => {
-            0
-        },
-    }
+fn create_manga(path: &str, app: AppHandle, state: State<Mutex<MangaBook>>) -> CreateMangaResult {
+    try_create_manga(path, app, state).into()
 }
 
 #[tauri::command]
@@ -153,7 +112,7 @@ fn add_password(text: String, state: State<Mutex<MangaBook>>) -> bool {
 
 #[tauri::command]
 fn next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    println!("next {} page", count);
+    eprintln!("next {} page", count);
     {
         let mut manga = state.lock().unwrap();
         manga.next_page(count);
@@ -163,7 +122,7 @@ fn next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 
 #[tauri::command]
 fn last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    println!("last {} page", count);
+    eprintln!("last {} page", count);
     {
         let mut manga = state.lock().unwrap();
         manga.last_page(count);
@@ -173,27 +132,27 @@ fn last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 
 #[tauri::command]
 fn step_next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    println!("step next {} page", count);
+    eprintln!("step next {} page", count);
     {
         let mut manga = state.lock().unwrap();
-        manga.step_next_page(count);
+        manga.step_next_page();
     }
     refresh(count, state)
 }
 
 #[tauri::command]
 fn step_last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    println!("step last {} page", count);
+    eprintln!("step last {} page", count);
     {
         let mut manga = state.lock().unwrap();
-        manga.step_last_page(count);
+        manga.step_last_page();
     }
     refresh(count, state)
 }
 
 #[tauri::command]
 fn home(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    println!("home {} page", count);
+    eprintln!("home {} page", count);
     let index = 0;
     jump_to(index, count, state.clone());
     refresh(count, state)
@@ -244,21 +203,38 @@ fn pick_file(app: tauri::AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
-fn show_popup(app: tauri::AppHandle, text: String) -> Result<(), String> {
-    dbg!("here");
-    app.dialog()
-        .message(&text)
-        .title("提示")
-        .show(|_| ());
-    
-    Ok(())
+fn show_guide(app: AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        if let Some(window) = app.get_webview_window("guide") {
+            let _ = window.set_focus();
+        } else {
+            tauri::WebviewWindowBuilder::new(
+                &app,
+                "guide",
+                tauri::WebviewUrl::App("public/guide.html".into()), // ← 关键：External
+            )
+            .title("操作指南")
+            .inner_size(400.0, 600.0)
+            .resizable(true)
+            .build()
+            .expect("open guide window");
+        }
+    });
+
+}
+
+#[tauri::command]
+fn focus_window(app: AppHandle) {
+    let window = app.get_webview_window("main").unwrap();
+    window.unminimize().unwrap();
+    window.set_focus().unwrap();
 }
 
 #[tauri::command]
 fn error_test() -> LoadPageResult {
     LoadPageResult::Other(String::from("This is an error."))
 }
-
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -274,15 +250,21 @@ pub fn run() {
             main_win.on_window_event(move |evt| {
                 match evt {
                     WindowEvent::CloseRequested { .. } => {
-                        println!(">>> window closing — 清缓存");
+                        eprintln!(">>> window closing — 清缓存");
                         // 这里把 page_caches 填 None，Drop 立即跑
                         let state = app_handle.state::<Mutex<MangaBook>>();
                         let mut manga = state.lock().unwrap();
                         let mut empty = MangaBook::default();
                         std::mem::swap(&mut empty, &mut manga);
+                        if let Some(window) = app_handle.get_webview_window("guide") {
+                            match window.close() {
+                                Ok(()) => eprintln!("关闭指南窗口成功"),
+                                Err(e) => eprintln!("关闭指南窗口失败：{}", e),
+                            }
+                        }
                     },
                     WindowEvent::Destroyed => {
-                        println!(">>> window destroyed");
+                        eprintln!(">>> window destroyed");
                     },
                     _ => {}
                 }
@@ -320,7 +302,7 @@ pub fn run() {
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, read_binary_file, create_manga, next, last, refresh, step_next, step_last, show_popup, add_password, pick_file, jump_to, page_count, home, end, error_test])
+        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

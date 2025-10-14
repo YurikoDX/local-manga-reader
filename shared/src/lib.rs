@@ -3,7 +3,22 @@ use zip::result::ZipError;
 
 pub const NEED_PASSWORD: &str = "Password required to decrypt file";
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
+pub enum CreateMangaResult {
+    Success(usize),
+    Other(String),
+}
+
+impl From<anyhow::Result<usize>> for CreateMangaResult {
+    fn from(value: anyhow::Result<usize>) -> Self {
+        match value {
+            Ok(x) => CreateMangaResult::Success(x),
+            Err(e) => CreateMangaResult::Other(e.to_string()),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug)]
 pub enum LoadPageResult {
     Success(Vec<String>),
     NeedPassword,

@@ -1,11 +1,11 @@
 use std::fs::File;
 use std::io;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 
 use zip::{ZipArchive, read::ZipFile, result::ZipError::{self, *}};
-use sevenz_rust::SevenZReader;
+// use sevenz_rust::SevenZReader;
 
 pub type FileBytes = Vec<u8>;
 
@@ -43,14 +43,46 @@ impl PageCache {
 
 impl Drop for PageCache {
     fn drop(&mut self) {
-        println!("dropping {}", self.path.to_string_lossy());
+        eprintln!("dropping {}", self.path.to_string_lossy());
         if let Err(e) = std::fs::remove_file(self.path.as_path()) {
-            println!("Error removing page cache: {}", e);
+            eprintln!("Error removing page cache: {}", e);
         }
     }
 }
 
+// #[derive(Debug)]
+// pub enum SourceFormat {
+//     Zip,
+//     Epub,
+//     Tar,
+//     Directory,
+// }
+
+// impl TryFrom<&Path> for SourceFormat {
+//     type Error = ();
+
+//     fn try_from(value: &Path) -> Result<Self, Self::Error> {
+//         if value.is_dir() {
+//             Ok(Self::Directory)
+//         } else {
+//             match value.extension() {
+//                 Some(x) => match x.to_str() {
+//                     Some(x) => match x.to_ascii_lowercase().as_str() {
+//                         "zip" => Ok(Self::Zip),
+//                         "epub" => Ok(Self::Epub),
+//                         "tar" => Ok(Self::Tar),
+//                         _ => Err(()),
+//                     },
+//                     None => Err(()),
+//                 },
+//                 None => Err(()),
+//             }
+//         }
+//     }
+// }
+
 pub trait PageSource: Send + Sync {
+    fn set_cache_dir(&mut self, cache_dir: PathBuf);
     fn get_page(&mut self, index: usize) -> anyhow::Result<&Path>;
     fn add_password(&mut self, pwd: Vec<u8>) -> bool;
     fn page_count(&self) -> usize;
@@ -59,6 +91,8 @@ pub trait PageSource: Send + Sync {
 pub struct NoSource;
 
 impl PageSource for NoSource {
+    fn set_cache_dir(&mut self, _: PathBuf) {}
+
     fn get_page(&mut self, _index: usize) -> anyhow::Result<&Path> {
         Ok(Path::new(""))
     }
@@ -72,7 +106,26 @@ impl PageSource for NoSource {
     }
 }
 
+impl TryFrom<&Path> for Box<dyn PageSource> {
+    type Error = anyhow::Error;
 
+    fn try_from(path: &Path) -> Result<Self, Self::Error> {
+        if path.is_dir() {
+            Err(anyhow::anyhow!("暂不支持目录"))
+        } else {
+            match path.extension() {
+                Some(ext) => match ext.to_str() {
+                    Some(ext) => match ext.to_ascii_lowercase().as_str() {
+                        "zip" => Ok(Box::new(ZippedSource::new(path)?)),
+                        _ => Err(anyhow::anyhow!("不支持的文件格式")),
+                    }
+                    None => Err(anyhow::anyhow!("非法的后缀名")),
+                },
+                None => Err(anyhow::anyhow!("文件后缀名缺失")),
+            }
+        }
+    }
+}
 
 pub struct ZippedSource {
     passwords: HashSet<Vec<u8>>,
@@ -83,6 +136,10 @@ pub struct ZippedSource {
 }
     
 impl PageSource for ZippedSource {
+    fn set_cache_dir(&mut self, cache_dir: PathBuf) {
+        self.cache_dir = cache_dir
+    }
+
     fn get_page(&mut self, index: usize) -> anyhow::Result<&Path> {
         if index >= self.page_count() {
             // 索引出界
@@ -108,10 +165,11 @@ impl PageSource for ZippedSource {
 }
 
 impl ZippedSource {
-    pub fn new(file: File, cache_dir: impl AsRef<Path>) -> io::Result<Self> {
+    pub fn new(file_path: impl AsRef<Path>) -> io::Result<Self> {
+        let file = File::open(file_path.as_ref())?;
         let passwords = Default::default();
         let zip_archive = ZipArchive::new(file)?;
-        let cache_dir = cache_dir.as_ref().to_path_buf();
+        let cache_dir = Default::default();
         let indice_table = {
             let file_names: Vec<&str> = zip_archive.file_names().collect();
             let mut indice_table: Vec<usize> = (0..zip_archive.len()).collect();

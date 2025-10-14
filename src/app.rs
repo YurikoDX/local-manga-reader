@@ -3,8 +3,18 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use leptos::*;
-// use tauri_sys::tauri;
+
 use web_sys::KeyboardEvent;
+
+use shared::{CreateMangaResult, LoadPageResult};
+
+lazy_static::lazy_static! {
+    static ref SUPPORTED_FILE_FORMAT: trie_rs::Trie<u8> = [
+        "zip",
+        "epub",
+        "7z",
+    ].into_iter().collect();
+}
 
 #[wasm_bindgen]
 extern "C" {
@@ -38,8 +48,6 @@ struct JumpPagePayload {
 struct TextPayload {
     text: String,
 }
-
-use shared::LoadPageResult;
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -105,16 +113,19 @@ pub fn App() -> impl IntoView {
 
     let create_manga = move |path: String| {
         spawn_local(async move {
+            invoke("focus_window", JsValue::null()).await;
             let payload = CreateMangaPayload { path: path };
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-            let pages_path = invoke("create_manga", args).await;
-            let resp: usize = serde_wasm_bindgen::from_value(pages_path).unwrap();
-            if resp > 0 {
-                set_page_count.set(resp);
-                load_and_show("refresh");
-                set_empty_manga.set(false);
-            } else {
-                todo!();
+            let resp: CreateMangaResult = serde_wasm_bindgen::from_value(invoke("create_manga", args).await).unwrap();
+            match resp {
+                CreateMangaResult::Success(x) => {
+                    set_page_count.set(x);
+                    load_and_show("refresh");
+                    set_empty_manga.set(false);
+                },
+                CreateMangaResult::Other(e) => {
+                    web_sys::window().and_then(|window| window.alert_with_message(format!("载入漫画出错：{}", e).as_str()).ok());
+                }
             }
         });
     };
@@ -130,7 +141,7 @@ pub fn App() -> impl IntoView {
 
     let jump = move || {
         let prompt = format!("请输入目标页码（共 {} 页）：", page_count.get_untracked());
-        if let Some(mut page_index_s) = get_input(prompt.as_str()) {
+        if let Some(page_index_s) = get_input(prompt.as_str()) {
             let page_index_s: String = page_index_s.chars().filter(|x| '0' <= *x && *x <= '9').collect();
             if page_index_s.is_empty() {
 
@@ -171,19 +182,26 @@ pub fn App() -> impl IntoView {
     };
 
     let on_wheel = move |ev: leptos::ev::WheelEvent| {
-        ev.prevent_default();                       // 阻止页面本身滚动
+        ev.prevent_default(); // 阻止页面本身滚动
         let dy = ev.delta_y();
-        if dy > -3.0 {            // 向下滚
+        if dy > -3.0 {
             load_and_show("next");
-        } else if dy < 3.0 {      // 向上滚
+        } else if dy < 3.0 {
             load_and_show("last");
         }
     };
 
     window_event_listener(ev::keydown, move |ev: KeyboardEvent| {
         match ev.code().as_str() {
-            "PageDown" | "ArrowDown" | "Space" | "Numpad2" => load_and_show("next"),
             "PageUp" | "ArrowUp" | "Numpad8" => load_and_show("last"),
+            "PageDown" | "ArrowDown" | "Space" | "Numpad2" => load_and_show("next"),
+            "ArrowLeft" | "Numpad4" => load_and_show(
+                if reading_direction.get_untracked() {
+                    "next"
+                } else {
+                    "last"
+                }
+            ),
             "ArrowRight" | "Numpad6" => load_and_show(
                 if reading_direction.get_untracked() {
                     "last"
@@ -191,11 +209,18 @@ pub fn App() -> impl IntoView {
                     "next"
                 }
             ),
-            "ArrowLeft" | "Numpad4" => load_and_show(
+            "Comma" => load_and_show(
                 if reading_direction.get_untracked() {
-                    "next"
+                    "step_next"
                 } else {
-                    "last"
+                    "step_last"
+                }
+            ),
+            "Period" => load_and_show(
+                if reading_direction.get_untracked() {
+                    "step_last"
+                } else {
+                    "step_next"
                 }
             ),
             "Home" => load_and_show("home"),
@@ -215,6 +240,12 @@ pub fn App() -> impl IntoView {
             "KeyR" => set_reading_direction.set(!reading_direction.get_untracked()),
             "KeyO" => pick_manga(),
             "KeyJ" => jump(),
+            "KeyH" => {
+                spawn_local(async move {
+                    invoke("show_guide", JsValue::null()).await;
+                });
+            },
+            #[cfg(debug_assertions)]
             "KeyE" => {
                 spawn_local(async move {
                     let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke("error_test", JsValue::null()).await).unwrap();
@@ -224,19 +255,24 @@ pub fn App() -> impl IntoView {
                         LoadPageResult::NeedPassword => leptos::logging::log!("Need password."),
                     }
                 });
-                
             },
+            #[cfg(debug_assertions)]
             "KeyP" => {
-                let pwd = get_input("请输入密码：");
-                // let pwd = String::from("hello");
-                leptos::logging::log!("输入的密码是： {:?}", pwd);
+                let input = get_input("输入测试：");
+                leptos::logging::log!("{:?}", input);
             },
+            #[cfg(debug_assertions)]
+            "KeyK" => {
+                web_sys::window().and_then(|window| window.alert_with_message("哇袄！").ok());
+            },
+            #[cfg(debug_assertions)]
             x => {
                 leptos::logging::log!("ev.code() == {}", x);
-            }
+            },
+            #[cfg(not(debug_assertions))]
+            _ => (),
         }
     });
-
 
     // 直接设置事件监听器
     spawn_local(async move {

@@ -5,10 +5,6 @@ description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
 
-[profile.release]
-opt-level = 0  # 关闭优化
-debug = true   # 保留调试信息
-
 [profile.dev]
 opt-level = 0
 debug = true
