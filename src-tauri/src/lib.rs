@@ -195,7 +195,7 @@ fn pick_file(app: tauri::AppHandle) -> Option<String> {
         .dialog()
         .file()
         .set_title("选择漫画")
-        .add_filter("压缩文件", &["zip"])
+        .add_filter("支持的格式", &["zip", "epub"])
         .blocking_pick_file();
     window.show().unwrap();
 
