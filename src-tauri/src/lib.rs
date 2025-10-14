@@ -4,7 +4,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use std::sync::Mutex;
 
-mod source;
+pub mod source;
 use source::{PageSource, NoSource};
 
 use shared::{CreateMangaResult, LoadPageResult};
