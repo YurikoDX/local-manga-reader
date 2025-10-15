@@ -113,10 +113,18 @@ button {
 
 html,
 body {
+  user-select: none;
   margin: 0;
   padding: 0;
   height: 100vh;
   /* 精确一屏 */
   overflow: hidden;
   /* 1. 禁止滚动 */
+}
+/* 禁止拖拽 */
+img {
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  -o-user-drag: none;
 }

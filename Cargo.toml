@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 leptos = { version = "0.7", features = ["csr"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
@@ -13,7 +14,9 @@ serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1.7"
 web-sys = { version = "0.3", features = ["Blob", "Url", "BlobPropertyBag"] }
-shared = { path = "shared" }
+trie-rs = "0.4.2"
+lazy_static = "1.5.0"
+shared = { path = "./shared" }
 
 [workspace]
-members = [ "shared","src-tauri"]
+members = [ "shared", "src-tauri"]

@@ -1,13 +1,20 @@
 use leptos::task::spawn_local;
-use leptos::{ev::SubmitEvent, prelude::*};
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use leptos::*;
-// use tauri_sys::tauri;
-use web_sys::{Blob, Url, BlobPropertyBag, KeyboardEvent};
-use js_sys::{Uint8Array, Array, Object, Reflect};
 
-use shared::LoadPageResult::{self, *};
+use web_sys::KeyboardEvent;
+
+use shared::{CreateMangaResult, LoadPageResult};
+
+lazy_static::lazy_static! {
+    static ref SUPPORTED_FILE_FORMAT: trie_rs::Trie<u8> = [
+        "zip",
+        "epub",
+        "7z",
+    ].into_iter().collect();
+}
 
 #[wasm_bindgen]
 extern "C" {
@@ -21,20 +28,19 @@ extern "C" {
     fn convert_file_src(file_path: &str) -> String;
 }
 
-#[wasm_bindgen]
-pub fn show_prompt(message: &str) -> Option<String> {
-    web_sys::window()?
-        .prompt_with_message(message).unwrap_or_default()
-}
-
 #[derive(Deserialize, Serialize)]
 struct CreateMangaPayload {
     path: String,
-    count: usize,
 }
 
 #[derive(Deserialize, Serialize)]
 struct PageTurnPayload {
+    count: usize,
+}
+
+#[derive(Deserialize, Serialize)]
+struct JumpPagePayload {
+    index: usize,
     count: usize,
 }
 
@@ -45,41 +51,123 @@ struct TextPayload {
 
 #[component]
 pub fn App() -> impl IntoView {
-    let (empty, set_empty) = signal(true);
     let (size, set_size) = signal(2_usize);
     let (img_data, set_img_data) = signal(vec![String::new(); size.get_untracked()]);
     let (reading_direction, set_reading_direction) = signal(true);
+    let (empty_manga, set_empty_manga) = signal(true);
+    let (page_count, set_page_count) = signal(0_usize);
+
+    let get_input = |prompt: &str| -> Option<String> {
+        if let Some(resp) = web_sys::window().and_then(|win| win.prompt_with_message(prompt).ok()) {
+            resp
+        } else {
+            Default::default()
+        }
+    };
 
     // 通用：调用指定命令，返回 Vec<String> 并更新两张图
     let load_and_show = move |cmd: &'static str| {
         spawn_local(async move {
             let payload = PageTurnPayload { count: size.get_untracked() };
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-            let raw = invoke(cmd, args).await;
-            let resp: LoadPageResult = serde_wasm_bindgen::from_value(raw).unwrap();
-            if let LoadPageResult::Ok(mut paths) = resp {
-                set_empty.set(false);
-                paths.resize(size.get_untracked(), String::new());
-                set_img_data.set(paths);
+            let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
+            match resp {
+                LoadPageResult::Success(mut paths) => {
+                    paths.resize(size.get_untracked(), String::new());
+                    set_img_data.set(paths);
+                },
+                LoadPageResult::NeedPassword => {
+                    loop {
+                        let pwd = match get_input("请输入解压密码：") {
+                            Some(x) => x,
+                            None => break,
+                        };
+                        let payload = TextPayload { text: pwd };
+                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
+                        let _resp: bool = serde_wasm_bindgen::from_value(invoke("add_password", args).await).unwrap();
+                        let payload = PageTurnPayload { count: size.get_untracked() };
+                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
+                        let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
+                        match resp {
+                            LoadPageResult::Success(mut paths) => {
+                                paths.resize(size.get_untracked(), String::new());
+                                set_img_data.set(paths);
+                                break;
+                            },
+                            LoadPageResult::NeedPassword => {
+                                web_sys::window().and_then(|win| win.confirm_with_message("密码错误").ok());
+                            },
+                            LoadPageResult::Other(e) => {
+                                web_sys::window().and_then(|win| win.alert_with_message(format!("其他错误：{}", e).as_str()).ok());
+                            },
+                        }
+
+                    }
+                },
+                LoadPageResult::Other(e) => {
+                    web_sys::window().and_then(|win| win.alert_with_message(format!("错误：{}", e).as_str()).ok());
+                },
             }
         })
     };
 
-    let show_help = || {
+    let create_manga = move |path: String| {
         spawn_local(async move {
-            let payload = TextPayload { text: String::from("哇袄！") };
+            invoke("focus_window", JsValue::null()).await;
+            let payload = CreateMangaPayload { path: path };
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-            invoke("show_popup", args).await;
-            // if let Some(window) = web_sys::window() {
-            //     window.alert_with_message("哇袄！").unwrap();
-            // }
+            let resp: CreateMangaResult = serde_wasm_bindgen::from_value(invoke("create_manga", args).await).unwrap();
+            match resp {
+                CreateMangaResult::Success(x) => {
+                    set_page_count.set(x);
+                    load_and_show("refresh");
+                    set_empty_manga.set(false);
+                },
+                CreateMangaResult::Other(e) => {
+                    web_sys::window().and_then(|window| window.alert_with_message(format!("载入漫画出错：{}", e).as_str()).ok());
+                }
+            }
+        });
+    };
 
-        })
+    let pick_manga = move || {
+        spawn_local(async move {
+            let resp: Option<String> = serde_wasm_bindgen::from_value(invoke("pick_file", JsValue::null()).await).unwrap();
+            if let Some(path) = resp {
+                create_manga(path);
+            }
+        });
+    };
+
+    let jump = move || {
+        let prompt = format!("请输入目标页码（共 {} 页）：", page_count.get_untracked());
+        if let Some(page_index_s) = get_input(prompt.as_str()) {
+            let page_index_s: String = page_index_s.chars().filter(|x| '0' <= *x && *x <= '9').collect();
+            if page_index_s.is_empty() {
+
+            } else {
+                if let Ok(index) = page_index_s.parse::<usize>() {
+                    let count = size.get_untracked();
+                    spawn_local(async move {
+                        let payload = JumpPagePayload { index, count };
+                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
+                        let _: () = serde_wasm_bindgen::from_value(invoke("jump_to", args).await).unwrap();
+                        load_and_show("refresh");
+                    });
+
+                } else {
+
+                }
+
+            }
+
+        }
+
     };
 
     let on_mousedown = move |ev: leptos::ev::MouseEvent| {
-        if empty.get_untracked() {
-            load_and_show("pick_file");
+        if empty_manga.get_untracked() {
+            pick_manga();
         } else {
             match ev.button() {
                 0 => {
@@ -94,135 +182,106 @@ pub fn App() -> impl IntoView {
     };
 
     let on_wheel = move |ev: leptos::ev::WheelEvent| {
-        ev.prevent_default();                       // 阻止页面本身滚动
-        if !empty.get_untracked() {
-            let dy = ev.delta_y();
-            if dy > -3.0 {            // 向下滚
-                load_and_show("next");
-            } else if dy < 3.0 {      // 向上滚
-                load_and_show("last");
-            }
+        ev.prevent_default(); // 阻止页面本身滚动
+        let dy = ev.delta_y();
+        if dy > -3.0 {
+            load_and_show("next");
+        } else if dy < 3.0 {
+            load_and_show("last");
         }
     };
 
-    Effect::new(move |_| {
-        let closure = Closure::wrap(Box::new(move |ev: KeyboardEvent| {
-            if empty.get_untracked() {
-                if ev.code() == "KeyO" {
-                    load_and_show("pick_file");
+    window_event_listener(ev::keydown, move |ev: KeyboardEvent| {
+        match ev.code().as_str() {
+            "PageUp" | "ArrowUp" | "Numpad8" => load_and_show("last"),
+            "PageDown" | "ArrowDown" | "Space" | "Numpad2" => load_and_show("next"),
+            "ArrowLeft" | "Numpad4" => load_and_show(
+                if reading_direction.get_untracked() {
+                    "next"
+                } else {
+                    "last"
                 }
-                
-                // if ev.code() == "KeyL" {
-                //     web_sys::console::log_1(&serde_wasm_bindgen::to_value("进来了").unwrap());
-                //     spawn_local(async move {
-                //         match serde_wasm_bindgen::from_value::<LoadPageResult>(invoke("error_test", JsValue::null()).await) {
-                //             Ok(x) => {
-                //                 let m = format!("{:?}", x);
-                //                 web_sys::console::log_1(&serde_wasm_bindgen::to_value(&m).unwrap());
-                //             },
-                //             Err(_) => {
-                //                 web_sys::console::log_1(&serde_wasm_bindgen::to_value("序列化失败了").unwrap());
-                //             },
-                //         }
-                //         // let m = match r {
-                //         //     Ok(()) => "yes",
-                //         //     Err(LoadPageError::NeedPassword) => "NeedPassword",
-                //         //     Err(LoadPageError::Other(_s)) => "other",
-                //         // };
-                //         // web_sys::console::log_1(&serde_wasm_bindgen::to_value(&m).unwrap());
-                //     });
-
-                // }
-            } else {
-                match ev.code().as_str() {
-                    "ArrowDown"  => load_and_show("next"),
-                    "ArrowRight" => load_and_show(if reading_direction.get_untracked() { "last" } else { "next" }),
-                    "ArrowUp" => load_and_show("last"),
-                    "ArrowLeft" => load_and_show(if reading_direction.get_untracked() { "next" } else { "last" }),
-                    "KeyF" => load_and_show("step_next"),
-                    "KeyD" => load_and_show("step_last"),
-                    "KeyO" => {
-                        load_and_show("pick_file");
-                    },
-                    "Minus" | "NumpadSubtract" => {
-                        let size_before = size.get_untracked();
-                        if size_before > 1 {
-                            let size_now = size_before - 1;
-                            set_size.set(size_now);
-                            load_and_show("refresh");
-                        }
-                    },
-                    "Equal" | "NumpadAdd" => {
-                        let size_before = size.get_untracked();
-                        let size_now = size_before + 1;
-                        set_size.set(size_now);
-                        load_and_show("refresh");
-                    },
-                    "KeyR" => {
-                        set_reading_direction.set(!reading_direction.get_untracked());
-                    },
-                    "KeyH" => {
-                        show_help();
-                    },
-                    "KeyP" => {
-                        show_prompt("abc");
-                    },
-                    #[cfg(debug_assertions)]
-                    "Pause" => {
-                        // spawn_local(async move {
-                        //     match serde_wasm_bindgen::from_value::<LoadPageResult>(invoke("error_test", JsValue::null()).await) {
-                        //         Ok(x) => {
-                        //             ()
-                        //         },
-                        //         Err(_) => {
-                        //             web_sys::console::log_1(&serde_wasm_bindgen::to_value("序列化失败了").unwrap());
-                        //         },
-                        //     }
-                        //     // let m = match r {
-                        //     //     Ok(()) => "yes",
-                        //     //     Err(LoadPageError::NeedPassword) => "NeedPassword",
-                        //     //     Err(LoadPageError::Other(_s)) => "other",
-                        //     // };
-                        //     // web_sys::console::log_1(&serde_wasm_bindgen::to_value(&m).unwrap());
-                        // });
-                        
-                    },
-                    x => {
-                        web_sys::console::log_1(&serde_wasm_bindgen::to_value(x).unwrap_or(JsValue::from_str("无法转为JsValue")));
-                    },
+            ),
+            "ArrowRight" | "Numpad6" => load_and_show(
+                if reading_direction.get_untracked() {
+                    "last"
+                } else {
+                    "next"
+                }
+            ),
+            "Comma" => load_and_show(
+                if reading_direction.get_untracked() {
+                    "step_next"
+                } else {
+                    "step_last"
+                }
+            ),
+            "Period" => load_and_show(
+                if reading_direction.get_untracked() {
+                    "step_last"
+                } else {
+                    "step_next"
+                }
+            ),
+            "Home" => load_and_show("home"),
+            "End" => load_and_show("end"),
+            "Minus" | "NumpadSubtract" => {
+                let size_before = size.get_untracked();
+                if size_before > 1 {
+                    set_size.set(size_before - 1);
+                    load_and_show("refresh");
                 }
             }
-        }) as Box<dyn FnMut(KeyboardEvent)>);
-
-        // 绑定到 window
-        window()
-            .add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref())
-            .unwrap();
-
-        // 忘记闭包，让浏览器管理生命周期
-        closure.forget();
+            "Equal" | "NumpadAdd" => {
+                let size_before = size.get_untracked();
+                set_size.set(size_before + 1);
+                load_and_show("refresh");
+            },
+            "KeyR" => set_reading_direction.set(!reading_direction.get_untracked()),
+            "KeyO" => pick_manga(),
+            "KeyJ" => jump(),
+            "KeyH" => {
+                spawn_local(async move {
+                    invoke("show_guide", JsValue::null()).await;
+                });
+            },
+            #[cfg(debug_assertions)]
+            "KeyE" => {
+                spawn_local(async move {
+                    let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke("error_test", JsValue::null()).await).unwrap();
+                    match resp {
+                        LoadPageResult::Success(x) => leptos::logging::log!("Success: {:?}", x),
+                        LoadPageResult::Other(e) => leptos::logging::log!("error code: {}", e),
+                        LoadPageResult::NeedPassword => leptos::logging::log!("Need password."),
+                    }
+                });
+            },
+            #[cfg(debug_assertions)]
+            "KeyP" => {
+                let input = get_input("输入测试：");
+                leptos::logging::log!("{:?}", input);
+            },
+            #[cfg(debug_assertions)]
+            "KeyK" => {
+                web_sys::window().and_then(|window| window.alert_with_message("哇袄！").ok());
+            },
+            #[cfg(debug_assertions)]
+            x => {
+                leptos::logging::log!("ev.code() == {}", x);
+            },
+            #[cfg(not(debug_assertions))]
+            _ => (),
+        }
     });
-
 
     // 直接设置事件监听器
     spawn_local(async move {
         let closure = Closure::wrap(Box::new(move |event: JsValue| {
             // 直接提取 event.payload.paths
             if let Some(paths_array) = extract_paths_from_event(event) {
-
-                spawn_local(async move {
-                    if let Some(path) = paths_array.into_iter().next() {
-                        set_empty.set(false);
-                        let size = size.get_untracked();
-                        let payload = CreateMangaPayload { path: path, count: size };
-                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-                        let pages_path = invoke("create_manga", args).await;
-                        let mut paths: Vec<String> = serde_wasm_bindgen::from_value(pages_path).unwrap();
-                        paths.resize(size, String::new());
-                        set_img_data.set(paths);
-                    }
-                });
-                
+                if let Some(path) = paths_array.into_iter().nth(0) {
+                    create_manga(path);
+                }
             }
         }) as Box<dyn FnMut(JsValue)>);
 

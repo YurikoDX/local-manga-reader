@@ -1,34 +1,41 @@
-use serde::{Serialize, Serializer, Deserialize, Deserializer, de::{self, MapAccess, Visitor}};
-use zip::result::ZipError::{self, UnsupportedArchive};
+use serde::{Serialize, Deserialize};
+use zip::result::ZipError;
 
 pub const NEED_PASSWORD: &str = "Password required to decrypt file";
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum LoadPageResult {
-    Ok(Vec<String>),
-    NeedPassword,
-    Cancel,
+#[derive(Deserialize, Serialize, Debug)]
+pub enum CreateMangaResult {
+    Success(usize),
     Other(String),
 }
 
-impl LoadPageResult {
-    pub fn is_ok(&self) -> bool {
-        match self {
-            &LoadPageResult::Ok(_) => true,
-            _ => false,
+impl From<anyhow::Result<usize>> for CreateMangaResult {
+    fn from(value: anyhow::Result<usize>) -> Self {
+        match value {
+            Ok(x) => CreateMangaResult::Success(x),
+            Err(e) => CreateMangaResult::Other(e.to_string()),
         }
     }
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub enum LoadPageResult {
+    Success(Vec<String>),
+    NeedPassword,
+    Other(String),
 }
 
 impl From<anyhow::Result<Vec<String>>> for LoadPageResult {
     fn from(value: anyhow::Result<Vec<String>>) -> Self {
         match value {
-            Ok(x) => LoadPageResult::Ok(x),
-            Err(x) => {
-                match x.downcast::<ZipError>() {
-                    Ok(e) => match e {
-                        UnsupportedArchive(NEED_PASSWORD) => LoadPageResult::NeedPassword,
-                        e => LoadPageResult::Other(e.to_string()),
+            Ok(v) => LoadPageResult::Success(v),
+            Err(e) => {
+                match e.downcast::<ZipError>() {
+                    Ok(zip_error) => {
+                        match zip_error {
+                            ZipError::InvalidPassword => LoadPageResult::NeedPassword,
+                            e => LoadPageResult::Other(e.to_string()),
+                        }
                     },
                     Err(e) => LoadPageResult::Other(e.to_string()),
                 }
