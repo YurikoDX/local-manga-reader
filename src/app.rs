@@ -289,7 +289,6 @@ pub fn App() -> impl IntoView {
 
     view! {
         <div class="viewport"
-            style="display:flex; height:100vh; width:100%; margin:0; padding:0;"
             on:contextmenu=|ev| ev.prevent_default()
             on:mousedown=on_mousedown
             on:wheel=on_wheel
@@ -349,8 +348,6 @@ pub fn ImageViewer(image_data: ImageData) -> impl IntoView {
         url
     };
     view! {
-        <div class="w-full h-full">
-            <img src=file_path />
-        </div>
+        <img src=file_path />
     }
 }

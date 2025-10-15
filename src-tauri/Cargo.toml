@@ -39,4 +39,5 @@ scraper = "0.17"
 path-clean = "1.0"
 urlencoding = "2.1"
 image = "0.25.8"
+rfd = "0.15.4"
 shared = { path = "../shared" }

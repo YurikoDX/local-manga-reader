@@ -189,17 +189,13 @@ fn refresh(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 #[tauri::command]
 fn pick_file(app: tauri::AppHandle) -> Option<String> {
     let window = app.get_webview_window("main").unwrap();
-    window.hide().unwrap();
 
-    let path = app
-        .dialog()
-        .file()
+    rfd::FileDialog::new()
         .set_title("选择漫画")
         .add_filter("支持的格式", &["zip", "epub"])
-        .blocking_pick_file();
-    window.show().unwrap();
-
-    path.map(|p| p.to_string())
+        .set_parent(&window)
+        .pick_file()
+        .and_then(|p| Some(p.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
