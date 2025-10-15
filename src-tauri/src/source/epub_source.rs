@@ -4,7 +4,7 @@ use scraper::{Html, Selector};
 use std::path::{Path, PathBuf};
 use std::io::{Read, Seek};
 
-use super::{PageSource, ZippedSource};
+use super::{PageSource, ZippedSource, ImageData};
 
 pub struct EpubSource(ZippedSource);
 
@@ -13,8 +13,8 @@ impl PageSource for EpubSource {
         false
     }
 
-    fn get_page(&mut self, index: usize) -> anyhow::Result<&Path> {
-        self.0.get_page(index)
+    fn get_page_data(&mut self, index: usize) -> anyhow::Result<ImageData> {
+        self.0.get_page_data(index)
     }
 
     fn page_count(&self) -> usize {

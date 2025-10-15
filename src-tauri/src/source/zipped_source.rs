@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::fs::File;
 use std::io;
 
-use super::{PageCache, PageSource, FileBytes, SUPPORTED_FORMATS};
+use super::{PageCache, PageSource, FileBytes, SUPPORTED_FORMATS, ImageData};
 
 pub struct ZippedSource {
     passwords: HashSet<Vec<u8>>,
@@ -19,16 +19,16 @@ impl PageSource for ZippedSource {
         self.cache_dir = cache_dir
     }
 
-    fn get_page(&mut self, index: usize) -> anyhow::Result<&Path> {
+    fn get_page_data(&mut self, index: usize) -> anyhow::Result<ImageData> {
         if index >= self.page_count() {
             // 索引出界
-            return Ok(Path::new(""));
+            return Ok(Default::default());
         }
         let index = self.indice_table[index];
         self.cache(index)?;
         if let Some(x) = self.caches.get(index) {
             let page_cache = x.as_ref().unwrap();
-            Ok(page_cache.get_path())
+            Ok(page_cache.get_data())
         } else {
             dbg!(index);
             dbg!(&self.indice_table);

@@ -72,8 +72,8 @@ pub fn App() -> impl IntoView {
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
             let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
             match resp {
-                LoadPageResult::Success(mut paths) => {
-                    paths.resize(size.get_untracked(), String::new());
+                LoadPageResult::Success(paths) => {
+                    let paths: Vec<String> = paths.into_iter().map(|image_data| if image_data.is_in_public() { Default::default() } else { image_data.path().to_string() }).collect();
                     set_img_data.set(paths);
                 },
                 LoadPageResult::NeedPassword => {
@@ -89,8 +89,8 @@ pub fn App() -> impl IntoView {
                         let args = serde_wasm_bindgen::to_value(&payload).unwrap();
                         let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
                         match resp {
-                            LoadPageResult::Success(mut paths) => {
-                                paths.resize(size.get_untracked(), String::new());
+                            LoadPageResult::Success(paths) => {
+                                let paths: Vec<String> = paths.into_iter().map(|image_data| if image_data.is_in_public() { Default::default() } else { image_data.path().to_string() }).collect();
                                 set_img_data.set(paths);
                                 break;
                             },

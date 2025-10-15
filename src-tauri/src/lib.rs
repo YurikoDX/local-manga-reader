@@ -7,7 +7,7 @@ use std::sync::Mutex;
 pub mod source;
 use source::{PageSource, NoSource};
 
-use shared::{CreateMangaResult, LoadPageResult};
+use shared::{CreateMangaResult, LoadPageResult, ImageData};
 
 struct MangaBook {
     source: Box<dyn PageSource>,
@@ -30,14 +30,14 @@ impl MangaBook {
         Self { source, ..Default::default() }
     }
 
-    fn get_page_path(&mut self, index: usize) -> anyhow::Result<String> {
-        Ok(self.source.get_page(index)?.to_string_lossy().to_string())
+    fn get_page_data(&mut self, index: usize) -> anyhow::Result<ImageData> {
+        Ok(self.source.get_page_data(index)?)
     }
 
-    fn refresh(&mut self, count: usize) -> anyhow::Result<Vec<String>> {
+    fn refresh(&mut self, count: usize) -> anyhow::Result<Vec<ImageData>> {
         let mut pages = Vec::with_capacity(count);
         for i in self.current_page..self.current_page + count {
-            let path = self.get_page_path(i)?;
+            let path = self.get_page_data(i)?;
             pages.push(path);
         }
         Ok(pages)

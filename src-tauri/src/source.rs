@@ -1,7 +1,8 @@
 use std::fs::File;
-use std::io;
-use std::io::Write;
+use std::io::{self, Write, Cursor};
 use std::path::{Path, PathBuf};
+
+use shared::ImageData;
 
 mod zipped_source;
 use zipped_source::ZippedSource;
@@ -10,7 +11,6 @@ mod epub_source;
 use epub_source::EpubSource;
 
 // mod directory_source;
-
 
 pub type FileBytes = Vec<u8>;
 
@@ -29,6 +29,7 @@ lazy_static::lazy_static! {
 
 pub struct PageCache {
     path: PathBuf,
+    aspect_ratio: f64,
 }
 
 impl PageCache {
@@ -36,11 +37,20 @@ impl PageCache {
         let mut file = File::create(path.as_ref())?;
         file.write_all(content.as_ref())?;
         let path = path.as_ref().to_path_buf();
-        Ok(Self { path })
+        let format = image::guess_format(content.as_ref()).expect("不支持的图片格式");
+        let reader = image::ImageReader::with_format(Cursor::new(content.as_ref()), format);
+        let (width, height) = reader.into_dimensions().expect("读取图片尺寸失败");
+        let aspect_ratio = width as f64 / height as f64;
+
+        Ok(Self { path, aspect_ratio })
     }
 
     pub fn get_path(&self) -> &Path {
         self.path.as_path()
+    }
+
+    pub fn get_data(&self) -> ImageData {
+        ImageData::new(self.path.as_path(), self.aspect_ratio)
     }
 }
 
@@ -55,7 +65,7 @@ impl Drop for PageCache {
 
 pub trait PageSource: Send + Sync {
     fn set_cache_dir(&mut self, cache_dir: PathBuf);
-    fn get_page(&mut self, index: usize) -> anyhow::Result<&Path>;
+    fn get_page_data(&mut self, index: usize) -> anyhow::Result<ImageData>;
     fn add_password(&mut self, pwd: Vec<u8>) -> bool;
     fn page_count(&self) -> usize;
 }
@@ -65,8 +75,8 @@ pub struct NoSource;
 impl PageSource for NoSource {
     fn set_cache_dir(&mut self, _: PathBuf) {}
 
-    fn get_page(&mut self, _index: usize) -> anyhow::Result<&Path> {
-        Ok(Path::new(""))
+    fn get_page_data(&mut self, _index: usize) -> anyhow::Result<ImageData> {
+        Ok(Default::default())
     }
 
     fn add_password(&mut self, _pwd: Vec<u8>) -> bool {
@@ -91,7 +101,7 @@ impl TryFrom<&Path> for Box<dyn PageSource> {
                         "zip" => Ok(Box::new(ZippedSource::new(path)?)),
                         "epub" => Ok(Box::new(EpubSource::new(path)?)),
                         _ => Err(anyhow::anyhow!("不支持的文件格式")),
-                    }
+                    },
                     None => Err(anyhow::anyhow!("非法的后缀名")),
                 },
                 None => Err(anyhow::anyhow!("文件后缀名缺失")),

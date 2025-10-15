@@ -2,14 +2,14 @@
 <svg width="210mm" height="297mm"
      viewBox="0 0 210 297"
      xmlns="http://www.w3.org/2000/svg"
-     font-family="Source Han Sans, SimHei, sans-serif">
+     font-family="monospace">
 
   <!-- 白色背景 -->
   <rect width="100%" height="100%" fill="white"/>
 
   <!-- ========= 手动改下面 4 个数字即可 ========= -->
   <g fill="#bbbbbb"
-     transform="translate(45,90) rotate(-40)">   <!-- x,y,角度 -->
+     transform="translate(43,90) rotate(-40)">   <!-- x,y,角度 -->
      <!-- 字体大小 -->
      <text x="0" y="0"
            font-size="72"
