@@ -6,7 +6,7 @@ use leptos::*;
 
 use web_sys::KeyboardEvent;
 
-use shared::{CreateMangaResult, LoadPageResult};
+use shared::{CreateMangaResult, LoadPageResult, ImageData};
 
 lazy_static::lazy_static! {
     static ref SUPPORTED_FILE_FORMAT: trie_rs::Trie<u8> = [
@@ -52,7 +52,7 @@ struct TextPayload {
 #[component]
 pub fn App() -> impl IntoView {
     let (size, set_size) = signal(2_usize);
-    let (img_data, set_img_data) = signal(vec![String::new(); size.get_untracked()]);
+    let (img_data, set_img_data) = signal(vec![ImageData::default(); size.get_untracked()]);
     let (reading_direction, set_reading_direction) = signal(true);
     let (empty_manga, set_empty_manga) = signal(true);
     let (page_count, set_page_count) = signal(0_usize);
@@ -73,7 +73,6 @@ pub fn App() -> impl IntoView {
             let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
             match resp {
                 LoadPageResult::Success(paths) => {
-                    let paths: Vec<String> = paths.into_iter().map(|image_data| if image_data.is_in_public() { Default::default() } else { image_data.path().to_string() }).collect();
                     set_img_data.set(paths);
                 },
                 LoadPageResult::NeedPassword => {
@@ -90,7 +89,6 @@ pub fn App() -> impl IntoView {
                         let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
                         match resp {
                             LoadPageResult::Success(paths) => {
-                                let paths: Vec<String> = paths.into_iter().map(|image_data| if image_data.is_in_public() { Default::default() } else { image_data.path().to_string() }).collect();
                                 set_img_data.set(paths);
                                 break;
                             },
@@ -290,7 +288,7 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
-        <div class="row"
+        <div class="viewport"
             style="display:flex; height:100vh; width:100%; margin:0; padding:0;"
             on:contextmenu=|ev| ev.prevent_default()
             on:mousedown=on_mousedown
@@ -298,8 +296,10 @@ pub fn App() -> impl IntoView {
         >
             {move || {
                     let v = img_data.get();
+                    let aspect_ratio: f64 = v.iter().map(|x| x.aspect_ratio()).sum();
+                    let width = (1000. * aspect_ratio) as u32;
                     let flag = reading_direction.get();
-                    view! { <MultiImageViewer file_paths=v reverse=flag /> }
+                    view! { <MultiImageViewer image_datas=v width=width reverse=flag /> }
                 }
             }
         </div>
@@ -324,14 +324,15 @@ fn extract_paths_from_event(event: JsValue) -> Option<Vec<String>> {
 }
 
 #[component]
-pub fn MultiImageViewer(file_paths: Vec<String>, reverse: bool) -> impl IntoView {
+pub fn MultiImageViewer(image_datas: Vec<ImageData>, width: u32, reverse: bool) -> impl IntoView {
+    let style = format!("--w:{}px; --h:1000px; width:var(--w); height:var(--h); --scale:min(100vw / var(--w), 100vh / var(--h)); transform:scale(var(--scale));", width);
     view! {
-        <div class="row" style="display:flex; height:100vh; width:100%;">
+        <div class="strip" style=style>
             {
                 if reverse {
-                    file_paths.into_iter().rev().map(|src| view! { <ImageViewer file_path=src /> }).collect_view()
+                    image_datas.into_iter().rev().map(|src| view! { <ImageViewer image_data=src /> }).collect_view()
                 } else {
-                    file_paths.into_iter().map(|src| view! { <ImageViewer file_path=src /> }).collect_view()
+                    image_datas.into_iter().map(|src| view! { <ImageViewer image_data=src /> }).collect_view()
                 }
             }
         </div>
@@ -339,20 +340,17 @@ pub fn MultiImageViewer(file_paths: Vec<String>, reverse: bool) -> impl IntoView
 }
 
 #[component]
-pub fn ImageViewer(file_path: String) -> impl IntoView {
-    let file_path = if file_path.is_empty() {
-        String::from("public/no_data.svg")
+pub fn ImageViewer(image_data: ImageData) -> impl IntoView {
+    let file_path = if image_data.is_in_public() {
+        image_data.path().to_string()
     } else {
-        let mut url = convert_file_src(file_path.as_str());
+        let mut url = convert_file_src(image_data.path());
         url.push_str(format!("?t={}", js_sys::Date::now()).as_str());
         url
     };
     view! {
         <div class="w-full h-full">
-            <img src=file_path
-                 style="width:100%; height:100%; object-fit:contain; display:block;"
-                 class="pic"
-            />
+            <img src=file_path />
         </div>
     }
 }

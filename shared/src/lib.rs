@@ -5,7 +5,7 @@ use std::{ffi::OsStr, path::Path};
 pub const NEED_PASSWORD: &str = "Password required to decrypt file";
 const A4_ASPECT_RATIO: f64 = 210. / 297.;  // Source: public/no_data.svg
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ImageData {
     path: String,
     in_public: bool,
