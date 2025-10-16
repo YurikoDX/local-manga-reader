@@ -1,6 +1,5 @@
 use tauri::{AppHandle, Manager, State};
 use std::path::Path;
-use tauri_plugin_dialog::DialogExt;
 
 use std::sync::Mutex;
 
@@ -297,7 +296,6 @@ pub fn run() {
         })
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

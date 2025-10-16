@@ -5,8 +5,6 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default",
-    "dialog:allow-message",
-    "dialog:default"
+    "opener:default"
   ]
 }
