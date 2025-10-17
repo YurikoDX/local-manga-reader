@@ -1,4 +1,5 @@
 use tauri::{AppHandle, Manager, State};
+use std::io::Write;
 use std::path::Path;
 
 use std::sync::Mutex;
@@ -7,6 +8,7 @@ pub mod source;
 use source::{PageSource, NoSource};
 
 use shared::{CreateMangaResult, LoadPageResult, ImageData};
+use shared::config::{Config};
 
 struct MangaBook {
     source: Box<dyn PageSource>,
@@ -227,6 +229,48 @@ fn focus_window(app: AppHandle) {
 }
 
 #[tauri::command]
+fn load_config(app: AppHandle) -> Config {
+    dbg!("here");
+    let app_data = app.path().resolve("", tauri::path::BaseDirectory::AppData).expect("无法访问 AppData 目录");
+    std::fs::create_dir_all(app_data.as_path()).expect("创建 AppData 目录失败");
+    let config_file_path = app_data.join("config.toml");
+    if config_file_path.is_file() {
+        match std::fs::read_to_string(config_file_path.as_path()) {
+            Ok(s) => match s.as_str().try_into() {
+                Ok(config) => {
+                    eprint!("读取配置文件成功。");
+                    std::io::stdout().flush().unwrap();
+                    config
+                },
+                Err(e) => {
+                    eprintln!("反序列化配置文件失败，将使用默认配置：{}", e);
+                    Default::default()
+                }
+            },
+            Err(e) => {
+                eprintln!("读取配置文件失败，将使用默认配置：{}", e);
+                Default::default()
+            }
+        }
+    } else {
+        let config = Config::default();
+        match std::fs::File::create(config_file_path.as_path()) {
+            Ok(mut file) => {
+                eprintln!("新建默认配置文件成功：{}", config_file_path.to_string_lossy());
+                let s = config.to_string();
+                match file.write_all(s.as_bytes()) {
+                    Ok(()) => eprintln!("写入默认配置文件。"),
+                    Err(e) => eprintln!("写入默认配置文件失败： {}", e),
+                }
+            },
+            Err(e) => eprintln!("新建默认配置文件失败： {}", e),
+        }
+
+        config
+    }
+}
+
+#[tauri::command]
 fn error_test() -> LoadPageResult {
     LoadPageResult::Other(String::from("This is an error."))
 }
@@ -296,7 +340,7 @@ pub fn run() {
         })
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, error_test])
+        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, load_config, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

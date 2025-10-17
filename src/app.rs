@@ -7,6 +7,8 @@ use leptos::*;
 use web_sys::KeyboardEvent;
 
 use shared::{CreateMangaResult, LoadPageResult, ImageData};
+use shared::config::{Config, InputAction};
+use trie_rs::map::Trie;
 
 lazy_static::lazy_static! {
     static ref SUPPORTED_FILE_FORMAT: trie_rs::Trie<u8> = [
@@ -56,6 +58,21 @@ pub fn App() -> impl IntoView {
     let (reading_direction, set_reading_direction) = signal(true);
     let (empty_manga, set_empty_manga) = signal(true);
     let (page_count, set_page_count) = signal(0_usize);
+
+    let config = {
+        let (config, set_config) = signal(Config::default());
+
+        spawn_local(async move {
+            let resp: Config = serde_wasm_bindgen::from_value(invoke("load_config", JsValue::null()).await).unwrap();
+            set_config.set(resp);
+        });
+
+        config.get_untracked()
+    };
+
+    let key_bind = config.key_bind;
+    let trie: Trie<u8, InputAction> = key_bind.into();
+    let trie = StoredValue::new(trie);
 
     let get_input = |prompt: &str| -> Option<String> {
         if let Some(resp) = web_sys::window().and_then(|win| win.prompt_with_message(prompt).ok()) {
@@ -141,10 +158,9 @@ pub fn App() -> impl IntoView {
         let prompt = format!("请输入目标页码（共 {} 页）：", page_count.get_untracked());
         if let Some(page_index_s) = get_input(prompt.as_str()) {
             let page_index_s: String = page_index_s.chars().filter(|x| '0' <= *x && *x <= '9').collect();
-            if page_index_s.is_empty() {
-
-            } else {
+            if !page_index_s.is_empty() {
                 if let Ok(index) = page_index_s.parse::<usize>() {
+                    let index = index.saturating_sub(1);
                     let count = size.get_untracked();
                     spawn_local(async move {
                         let payload = JumpPagePayload { index, count };
@@ -152,15 +168,90 @@ pub fn App() -> impl IntoView {
                         let _: () = serde_wasm_bindgen::from_value(invoke("jump_to", args).await).unwrap();
                         load_and_show("refresh");
                     });
-
-                } else {
-
                 }
-
             }
-
         }
+    };
 
+    let action_handler = move |input_action_code: &str| {
+        match trie.get_value().exact_match(input_action_code) {
+            Some(input_action) => match input_action {
+                InputAction::PageNext => load_and_show("next"),
+                InputAction::PageLast => load_and_show("last"),
+                InputAction::PageLeft => load_and_show(
+                    if reading_direction.get_untracked() {
+                        "next"
+                    } else {
+                        "last"
+                    }
+                ),
+                InputAction::PageRight => load_and_show(
+                    if reading_direction.get_untracked() {
+                        "last"
+                    } else {
+                        "next"
+                    }
+                ),
+                InputAction::PageStepNext => load_and_show("step_next"),
+                InputAction::PageStepLast => load_and_show("step_last"),
+                InputAction::PageStepLeft => load_and_show(
+                    if reading_direction.get_untracked() {
+                        "step_next"
+                    } else {
+                        "step_last"
+                    }
+                ),
+                InputAction::PageStepRight => load_and_show(
+                    if reading_direction.get_untracked() {
+                        "step_last"
+                    } else {
+                        "step_next"
+                    }
+                ),
+                InputAction::PageHome => load_and_show("home"),
+                InputAction::PageEnd => load_and_show("end"),
+                InputAction::PageJump => jump(),
+                InputAction::PageCountMinus => {
+                    let size_before = size.get_untracked();
+                    if size_before > 1 {
+                        set_size.set(size_before - 1);
+                        load_and_show("refresh");
+                    }
+                }
+                InputAction::PageCountPlus => {
+                    let size_before = size.get_untracked();
+                    set_size.set(size_before + 1);
+                    load_and_show("refresh");
+                },
+                InputAction::ReverseReading => {
+                    set_reading_direction.set(!reading_direction.get_untracked());
+                }
+                InputAction::Open => pick_manga(),
+                InputAction::Fullscreen => {
+                    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                        if document.fullscreen_element().is_some() {
+                            // 如果已经在全屏，则退出全屏
+                            document.exit_fullscreen();
+                            leptos::logging::log!("退出全屏");
+                        } else {
+                            // 如果不在全屏，则进入全屏
+                            if let Ok(_) = document.document_element().unwrap().request_fullscreen() {
+                                leptos::logging::log!("进入全屏");
+                            }
+                        }
+                    }
+                },
+                InputAction::ShowHelp => {
+                    spawn_local(async move {
+                        invoke("show_guide", JsValue::null()).await;
+                    });
+                },
+            },
+            None => {
+                #[cfg(debug_assertions)]
+                leptos::logging::log!("ev.code = {}", input_action_code);
+            },
+        }
     };
 
     let on_mousedown = move |ev: leptos::ev::MouseEvent| {
@@ -168,12 +259,9 @@ pub fn App() -> impl IntoView {
             pick_manga();
         } else {
             match ev.button() {
-                0 => {
-                    load_and_show("next");
-                }
-                2 => {
-                    load_and_show("last");
-                }
+                0 => action_handler("LeftClick"),
+                1 => action_handler("MiddleClick"),
+                2 => action_handler("RightClick"),
                 _ => {}
             }
         }
@@ -182,93 +270,23 @@ pub fn App() -> impl IntoView {
     let on_wheel = move |ev: leptos::ev::WheelEvent| {
         ev.prevent_default(); // 阻止页面本身滚动
         let dy = ev.delta_y();
-        if dy > -3.0 {
-            load_and_show("next");
-        } else if dy < 3.0 {
-            load_and_show("last");
+        if dy.abs() > config.scroll_threshold.abs() {
+            if dy.is_sign_positive() {
+                action_handler("WheelDown");
+            } else {
+                action_handler("WheelUp");
+            }
         }
     };
 
     window_event_listener(ev::keydown, move |ev: KeyboardEvent| {
-        match ev.code().as_str() {
-            "PageUp" | "ArrowUp" | "Numpad8" => load_and_show("last"),
-            "PageDown" | "ArrowDown" | "Space" | "Numpad2" => load_and_show("next"),
-            "ArrowLeft" | "Numpad4" => load_and_show(
-                if reading_direction.get_untracked() {
-                    "next"
-                } else {
-                    "last"
-                }
-            ),
-            "ArrowRight" | "Numpad6" => load_and_show(
-                if reading_direction.get_untracked() {
-                    "last"
-                } else {
-                    "next"
-                }
-            ),
-            "Comma" => load_and_show(
-                if reading_direction.get_untracked() {
-                    "step_next"
-                } else {
-                    "step_last"
-                }
-            ),
-            "Period" => load_and_show(
-                if reading_direction.get_untracked() {
-                    "step_last"
-                } else {
-                    "step_next"
-                }
-            ),
-            "Home" => load_and_show("home"),
-            "End" => load_and_show("end"),
-            "Minus" | "NumpadSubtract" => {
-                let size_before = size.get_untracked();
-                if size_before > 1 {
-                    set_size.set(size_before - 1);
-                    load_and_show("refresh");
-                }
-            }
-            "Equal" | "NumpadAdd" => {
-                let size_before = size.get_untracked();
-                set_size.set(size_before + 1);
-                load_and_show("refresh");
-            },
-            "KeyR" => set_reading_direction.set(!reading_direction.get_untracked()),
-            "KeyO" => pick_manga(),
-            "KeyJ" => jump(),
-            "KeyH" => {
-                spawn_local(async move {
-                    invoke("show_guide", JsValue::null()).await;
-                });
-            },
-            #[cfg(debug_assertions)]
-            "KeyE" => {
-                spawn_local(async move {
-                    let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke("error_test", JsValue::null()).await).unwrap();
-                    match resp {
-                        LoadPageResult::Success(x) => leptos::logging::log!("Success: {:?}", x),
-                        LoadPageResult::Other(e) => leptos::logging::log!("error code: {}", e),
-                        LoadPageResult::NeedPassword => leptos::logging::log!("Need password."),
-                    }
-                });
-            },
-            #[cfg(debug_assertions)]
-            "KeyP" => {
-                let input = get_input("输入测试：");
-                leptos::logging::log!("{:?}", input);
-            },
-            #[cfg(debug_assertions)]
-            "KeyK" => {
-                web_sys::window().and_then(|window| window.alert_with_message("哇袄！").ok());
-            },
-            #[cfg(debug_assertions)]
-            x => {
-                leptos::logging::log!("ev.code() == {}", x);
-            },
-            #[cfg(not(debug_assertions))]
-            _ => (),
+        ev.prevent_default();
+        let code = ev.code();
+        let code = code.as_str();
+        if code == "F12" {
+
+        } else {
+            action_handler(code);
         }
     });
 

@@ -117,11 +117,9 @@ body {
   margin: 0;
   padding: 0;
   height: 100vh;
-  /* 精确一屏 */
   overflow: hidden;
-  /* 1. 禁止滚动 */
 }
-/* 禁止拖拽 */
+
 img {
   -webkit-user-drag: none;
   -khtml-user-drag: none;
@@ -129,7 +127,6 @@ img {
   -o-user-drag: none;
 }
 
-/* 1. 视口保险箱 */
 html,
 body {
   margin: 0;
@@ -145,16 +142,12 @@ body {
   justify-content: center;
 }
 
-/* 2. 整条：先按原始尺寸渲染，再一次性 scale */
 .strip {
   display: flex;
-
   transform-origin: center center;
-
   transform: scale(var(--scale));
 }
 
-/* 3. 单图：填满高度，宽度自然 → 相对大小锁死 */
 .strip img {
   height: 100%;
   width: auto;

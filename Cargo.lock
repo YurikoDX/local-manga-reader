@@ -5162,6 +5162,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde",
+ "toml 0.9.8",
+ "trie-rs",
  "zip 6.0.0",
 ]
 
