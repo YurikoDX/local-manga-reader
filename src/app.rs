@@ -62,9 +62,10 @@ pub fn App() -> impl IntoView {
     let (scroll_threshold, set_scroll_threshold) = signal(3.);
 
     spawn_local(async move {
-        let js = invoke("load_config", JsValue::null()).await;
+        let js = invoke("read_config", JsValue::null()).await;
         let config = serde_wasm_bindgen::from_value::<Config>(js).unwrap();
         let key_bind = config.key_bind;
+        leptos::logging::log!("{:?}", key_bind);
         let trie: Trie<u8, InputAction> = key_bind.into();
         set_trie.set(trie);
         set_reading_direction.set(config.reading_from_right_to_left);

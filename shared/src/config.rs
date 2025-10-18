@@ -63,6 +63,44 @@ pub struct KeyBind {
     show_help: Vec<String>,
 }
 
+impl KeyBind {
+    /// 生成一段只在 DOM 就绪后执行的极简替换脚本，
+    /// 通过 .initialization_script() 注入即可。
+    pub fn to_replace_script(&self) -> String {
+        use std::fmt::Write;
+        let mut js = r#"window.addEventListener('DOMContentLoaded', ()=>{"#.to_string();
+
+        // 与 HTML 里 id 0..15 的顺序保持一致
+        let slots: &[&[String]] = &[
+            &self.page_next,      // 0
+            &self.page_last,      // 1
+            &self.page_left,      // 2
+            &self.page_right,     // 3
+            &[],                  // 4 未用
+            &[],                  // 5 未用
+            &self.page_step_left, // 6
+            &self.page_step_right,// 7
+            &self.page_home,      // 8
+            &self.page_end,       // 9
+            &self.page_jump,      // 10
+            &self.page_count_minus,//11
+            &self.page_count_plus, //12
+            &self.reverse,         //13
+            &self.open,            //14
+            &self.fullscreen,      //15
+        ];
+
+        for (idx, keys) in slots.iter().enumerate() {
+            if keys.is_empty() { continue; }
+            let text = keys.join(" / ");
+            writeln!(&mut js, "document.getElementById('{}').textContent = `{}`;", idx, text).unwrap();
+        }
+
+        js.push_str("});");
+        js
+    }
+}
+
 impl Preset for KeyBind {
     fn preset() -> Self {
         let page_next = vec![
@@ -243,21 +281,21 @@ impl From<KeyBind> for Trie<u8, InputAction> {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputAction {
-    PageNext,
-    PageLast, 
-    PageLeft,
-    PageRight,
-    PageStepNext,
-    PageStepLast,
-    PageStepLeft,
-    PageStepRight,
-    PageHome,
-    PageEnd,
-    PageJump,
-    PageCountMinus,
-    PageCountPlus,
-    ReverseReading,
-    Open,
-    Fullscreen,
-    ShowHelp,
+    PageNext = 0,
+    PageLast = 1,
+    PageLeft = 2,
+    PageRight = 3,
+    PageStepNext = 4,
+    PageStepLast = 5,
+    PageStepLeft = 6,
+    PageStepRight = 7,
+    PageHome = 8,
+    PageEnd = 9,
+    PageJump = 10,
+    PageCountMinus = 11,
+    PageCountPlus = 12,
+    ReverseReading = 13,
+    Open = 14,
+    Fullscreen = 15,
+    ShowHelp = 16,
 }

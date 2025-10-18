@@ -194,24 +194,24 @@ fn pick_file(app: tauri::AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
-fn show_guide(app: AppHandle) {
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        if let Some(window) = app.get_webview_window("guide") {
-            let _ = window.set_focus();
-        } else {
-            tauri::WebviewWindowBuilder::new(
-                &app,
-                "guide",
-                tauri::WebviewUrl::App("public/guide.html".into()), // ← 关键：External
-            )
-            .title("操作指南")
-            .inner_size(400.0, 600.0)
-            .resizable(true)
-            .build()
-            .expect("open guide window");
-        }
-    });
+fn show_guide(app: AppHandle, state: State<Config>) {
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    if let Some(window) = app.get_webview_window("guide") {
+        let _ = window.set_focus();
+    } else {
+        let script = state.key_bind.to_replace_script();
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            "guide",
+            tauri::WebviewUrl::App("public/guide.html".into()),
+        )
+        .title("操作指南")
+        .initialization_script(script)
+        .inner_size(600.0, 800.0)
+        .resizable(true)
+        .build()
+        .expect("open guide window");
+    }
 }
 
 #[tauri::command]
@@ -221,7 +221,6 @@ fn focus_window(app: AppHandle) {
     window.set_focus().unwrap();
 }
 
-#[tauri::command]
 fn load_config(app: AppHandle) -> Config {
     let app_data = app.path().resolve("", tauri::path::BaseDirectory::AppData).expect("无法访问 AppData 目录");
     std::fs::create_dir_all(app_data.as_path()).expect("创建 AppData 目录失败");
@@ -263,6 +262,11 @@ fn load_config(app: AppHandle) -> Config {
 }
 
 #[tauri::command]
+fn read_config(state: State<Config>) -> Config {
+    state.inner().clone()
+}
+
+#[tauri::command]
 fn error_test() -> LoadPageResult {
     LoadPageResult::Other(String::from("This is an error."))
 }
@@ -274,6 +278,9 @@ pub fn run() {
             use tauri::WindowEvent;
             // use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent};
             // use global_hotkey::HotKeyState;
+
+            let config = load_config(app.handle().clone());
+            app.manage(config);
 
             let main_win = app.get_webview_window("main").unwrap(); // 主窗口 label=main
             let app_handle = app.handle().clone();
@@ -343,7 +350,7 @@ pub fn run() {
         })
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, load_config, error_test])
+        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, read_config, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
