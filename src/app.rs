@@ -8,7 +8,7 @@ use web_sys::KeyboardEvent;
 
 use shared::{CreateMangaResult, LoadPageResult, ImageData};
 use shared::config::{Config, InputAction};
-use trie_rs::map::Trie;
+use trie_rs::map::{Trie, TrieBuilder};
 
 lazy_static::lazy_static! {
     static ref SUPPORTED_FILE_FORMAT: trie_rs::Trie<u8> = [
@@ -58,21 +58,18 @@ pub fn App() -> impl IntoView {
     let (reading_direction, set_reading_direction) = signal(true);
     let (empty_manga, set_empty_manga) = signal(true);
     let (page_count, set_page_count) = signal(0_usize);
+    let (trie, set_trie) = signal(TrieBuilder::new().build());
+    let (scroll_threshold, set_scroll_threshold) = signal(3.);
 
-    let config = {
-        let (config, set_config) = signal(Config::default());
-
-        spawn_local(async move {
-            let resp: Config = serde_wasm_bindgen::from_value(invoke("load_config", JsValue::null()).await).unwrap();
-            set_config.set(resp);
-        });
-
-        config.get_untracked()
-    };
-
-    let key_bind = config.key_bind;
-    let trie: Trie<u8, InputAction> = key_bind.into();
-    let trie = StoredValue::new(trie);
+    spawn_local(async move {
+        let js = invoke("load_config", JsValue::null()).await;
+        let config = serde_wasm_bindgen::from_value::<Config>(js).unwrap();
+        let key_bind = config.key_bind;
+        let trie: Trie<u8, InputAction> = key_bind.into();
+        set_trie.set(trie);
+        set_reading_direction.set(config.reading_from_right_to_left);
+        set_scroll_threshold.set(config.scroll_threshold);
+    });
 
     let get_input = |prompt: &str| -> Option<String> {
         if let Some(resp) = web_sys::window().and_then(|win| win.prompt_with_message(prompt).ok()) {
@@ -174,7 +171,7 @@ pub fn App() -> impl IntoView {
     };
 
     let action_handler = move |input_action_code: &str| {
-        match trie.get_value().exact_match(input_action_code) {
+        match trie.with(|t| t.exact_match(input_action_code).copied()) {
             Some(input_action) => match input_action {
                 InputAction::PageNext => load_and_show("next"),
                 InputAction::PageLast => load_and_show("last"),
@@ -270,7 +267,7 @@ pub fn App() -> impl IntoView {
     let on_wheel = move |ev: leptos::ev::WheelEvent| {
         ev.prevent_default(); // 阻止页面本身滚动
         let dy = ev.delta_y();
-        if dy.abs() > config.scroll_threshold.abs() {
+        if dy.abs() > scroll_threshold.get_untracked().abs() {
             if dy.is_sign_positive() {
                 action_handler("WheelDown");
             } else {
@@ -280,14 +277,9 @@ pub fn App() -> impl IntoView {
     };
 
     window_event_listener(ev::keydown, move |ev: KeyboardEvent| {
+        #[cfg(not(debug_assertions))]
         ev.prevent_default();
-        let code = ev.code();
-        let code = code.as_str();
-        if code == "F12" {
-
-        } else {
-            action_handler(code);
-        }
+        action_handler(ev.code().as_str());
     });
 
     // 直接设置事件监听器
@@ -343,6 +335,7 @@ fn extract_paths_from_event(event: JsValue) -> Option<Vec<String>> {
 #[component]
 pub fn MultiImageViewer(image_datas: Vec<ImageData>, width: u32, reverse: bool) -> impl IntoView {
     let style = format!("--w:{}px; --h:1000px; width:var(--w); height:var(--h); --scale:min(100vw / var(--w), 100vh / var(--h)); transform:scale(var(--scale));", width);
+    
     view! {
         <div class="strip" style=style>
             {
@@ -361,10 +354,9 @@ pub fn ImageViewer(image_data: ImageData) -> impl IntoView {
     let file_path = if image_data.is_in_public() {
         image_data.path().to_string()
     } else {
-        let mut url = convert_file_src(image_data.path());
-        url.push_str(format!("?t={}", js_sys::Date::now()).as_str());
-        url
+        convert_file_src(image_data.path())
     };
+
     view! {
         <img src=file_path />
     }

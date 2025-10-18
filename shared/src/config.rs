@@ -3,18 +3,22 @@ use std::fmt::Display;
 use serde::{Serialize, Deserialize};
 use trie_rs::map::{TrieBuilder, Trie};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+pub trait Preset {
+    fn preset() -> Self;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
     pub reading_from_right_to_left: bool,
     pub scroll_threshold: f64,
     pub key_bind: KeyBind,
 }
 
-impl Default for Config {
-    fn default() -> Self {
+impl Preset for Config {
+    fn preset() -> Self {
         let reading_from_right_to_left = true;
         let scroll_threshold = 3.0;
-        let key_bind = Default::default();
+        let key_bind = Preset::preset();
 
         Self {
             reading_from_right_to_left,
@@ -38,7 +42,7 @@ impl Display for Config {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct KeyBind {
     page_next: Vec<String>,
     page_last: Vec<String>,
@@ -59,8 +63,8 @@ pub struct KeyBind {
     show_help: Vec<String>,
 }
 
-impl Default for KeyBind {
-    fn default() -> Self {
+impl Preset for KeyBind {
+    fn preset() -> Self {
         let page_next = vec![
             String::from("PageDown"),
             String::from("ArrowDown"),

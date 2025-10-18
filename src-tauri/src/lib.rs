@@ -1,14 +1,14 @@
 use tauri::{AppHandle, Manager, State};
 use std::io::Write;
 use std::path::Path;
-
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Mutex;
 
 pub mod source;
 use source::{PageSource, NoSource};
 
 use shared::{CreateMangaResult, LoadPageResult, ImageData};
-use shared::config::{Config};
+use shared::config::{Config, Preset};
 
 struct MangaBook {
     source: Box<dyn PageSource>,
@@ -37,6 +37,8 @@ impl MangaBook {
 
     fn refresh(&mut self, count: usize) -> anyhow::Result<Vec<ImageData>> {
         let mut pages = Vec::with_capacity(count);
+        let page_count = self.source.page_count();
+        eprint!(">>> page {} - {} / {}\r", self.current_page + 1, self.current_page + count + 1, page_count);
         for i in self.current_page..self.current_page + count {
             let path = self.get_page_data(i)?;
             pages.push(path);
@@ -92,7 +94,8 @@ fn try_create_manga(path: &str, app: AppHandle, state: State<Mutex<MangaBook>>) 
     let path = Path::new(path);
     let mut source: Box<dyn PageSource> = path.try_into()?;
     let page_count = source.page_count();
-    let cache_dir = app.path().resolve("cache", tauri::path::BaseDirectory::AppData)?;
+    let ts_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+    let cache_dir = app.path().resolve(format!("cache/{}", ts_ms), tauri::path::BaseDirectory::AppData)?;
     std::fs::create_dir_all(cache_dir.as_path())?;
     source.set_cache_dir(cache_dir);
     let new_manga = MangaBook::new(source);
@@ -113,7 +116,6 @@ fn add_password(text: String, state: State<Mutex<MangaBook>>) -> bool {
 
 #[tauri::command]
 fn next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    eprintln!("next {} page", count);
     {
         let mut manga = state.lock().unwrap();
         manga.next_page(count);
@@ -123,7 +125,6 @@ fn next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 
 #[tauri::command]
 fn last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    eprintln!("last {} page", count);
     {
         let mut manga = state.lock().unwrap();
         manga.last_page(count);
@@ -133,7 +134,6 @@ fn last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 
 #[tauri::command]
 fn step_next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    eprintln!("step next {} page", count);
     {
         let mut manga = state.lock().unwrap();
         manga.step_next_page();
@@ -143,7 +143,6 @@ fn step_next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 
 #[tauri::command]
 fn step_last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    eprintln!("step last {} page", count);
     {
         let mut manga = state.lock().unwrap();
         manga.step_last_page();
@@ -153,7 +152,6 @@ fn step_last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 
 #[tauri::command]
 fn home(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    eprintln!("home {} page", count);
     let index = 0;
     jump_to(index, count, state.clone());
     refresh(count, state)
@@ -161,7 +159,6 @@ fn home(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 
 #[tauri::command]
 fn end(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    println!("end {} page", count);
     let index = usize::MAX;
     jump_to(index, count, state.clone());
     refresh(count, state)
@@ -173,16 +170,13 @@ fn page_count(state: State<Mutex<MangaBook>>) -> usize {
 }
 
 #[tauri::command]
-fn jump_to(index: usize, count: usize, state: State<Mutex<MangaBook>>) {
-    println!("jump to page {} with {} page", index, count);
-    
+fn jump_to(index: usize, count: usize, state: State<Mutex<MangaBook>>) {    
     let mut manga = state.lock().unwrap();
     manga.jump_to(index, count);
 }
 
 #[tauri::command]
 fn refresh(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
-    println!("refresh {} page", count);
     let mut manga = state.lock().unwrap();
     manga.refresh(count).into()
 }
@@ -218,7 +212,6 @@ fn show_guide(app: AppHandle) {
             .expect("open guide window");
         }
     });
-
 }
 
 #[tauri::command]
@@ -230,7 +223,6 @@ fn focus_window(app: AppHandle) {
 
 #[tauri::command]
 fn load_config(app: AppHandle) -> Config {
-    dbg!("here");
     let app_data = app.path().resolve("", tauri::path::BaseDirectory::AppData).expect("无法访问 AppData 目录");
     std::fs::create_dir_all(app_data.as_path()).expect("创建 AppData 目录失败");
     let config_file_path = app_data.join("config.toml");
@@ -238,32 +230,32 @@ fn load_config(app: AppHandle) -> Config {
         match std::fs::read_to_string(config_file_path.as_path()) {
             Ok(s) => match s.as_str().try_into() {
                 Ok(config) => {
-                    eprint!("读取配置文件成功。");
-                    std::io::stdout().flush().unwrap();
+                    eprintln!("读取配置文件成功。");
+                    std::io::stderr().flush().unwrap();
                     config
                 },
                 Err(e) => {
-                    eprintln!("反序列化配置文件失败，将使用默认配置：{}", e);
-                    Default::default()
+                    eprintln!("反序列化配置文件失败，将使用预设配置：{}", e);
+                    Preset::preset()
                 }
             },
             Err(e) => {
-                eprintln!("读取配置文件失败，将使用默认配置：{}", e);
-                Default::default()
+                eprintln!("读取配置文件失败，将使用预设配置：{}", e);
+                Preset::preset()
             }
         }
     } else {
         let config = Config::default();
         match std::fs::File::create(config_file_path.as_path()) {
             Ok(mut file) => {
-                eprintln!("新建默认配置文件成功：{}", config_file_path.to_string_lossy());
+                eprintln!("新建预设配置文件成功：{}", config_file_path.to_string_lossy());
                 let s = config.to_string();
                 match file.write_all(s.as_bytes()) {
-                    Ok(()) => eprintln!("写入默认配置文件。"),
-                    Err(e) => eprintln!("写入默认配置文件失败： {}", e),
+                    Ok(()) => eprintln!("写入预设配置文件。"),
+                    Err(e) => eprintln!("写入预设配置文件失败： {}", e),
                 }
             },
-            Err(e) => eprintln!("新建默认配置文件失败： {}", e),
+            Err(e) => eprintln!("新建预设配置文件失败： {}", e),
         }
 
         config
@@ -291,14 +283,25 @@ pub fn run() {
                     WindowEvent::CloseRequested { .. } => {
                         eprintln!(">>> window closing — 清缓存");
                         // 这里把 page_caches 填 None，Drop 立即跑
-                        let state = app_handle.state::<Mutex<MangaBook>>();
-                        let mut manga = state.lock().unwrap();
-                        let mut empty = MangaBook::default();
-                        std::mem::swap(&mut empty, &mut manga);
+                        {
+                            let state = app_handle.state::<Mutex<MangaBook>>();
+                            let mut manga = state.lock().unwrap();
+                            let mut empty = MangaBook::default();
+                            std::mem::swap(&mut empty, &mut manga);
+                        }
                         if let Some(window) = app_handle.get_webview_window("guide") {
                             match window.close() {
                                 Ok(()) => eprintln!("关闭指南窗口成功"),
                                 Err(e) => eprintln!("关闭指南窗口失败：{}", e),
+                            }
+                        }
+                        let cache_dir = app_handle.path().resolve("cache", tauri::path::BaseDirectory::AppData).unwrap();
+                        for entry in std::fs::read_dir(cache_dir).unwrap() {
+                            if let Ok(entry) = entry {
+                                let entry_path = entry.path();
+                                if std::fs::remove_dir(entry_path.as_path()).is_ok() {
+                                    eprintln!("移除空目录 {}", entry_path.to_string_lossy());
+                                }
                             }
                         }
                     },
