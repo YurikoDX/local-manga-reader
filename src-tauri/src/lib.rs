@@ -38,7 +38,7 @@ impl MangaBook {
     fn refresh(&mut self, count: usize) -> anyhow::Result<Vec<ImageData>> {
         let mut pages = Vec::with_capacity(count);
         let page_count = self.source.page_count();
-        eprint!(">>> page {} - {} / {}\r", self.current_page + 1, self.current_page + count + 1, page_count);
+        eprint!(">>> page {} - {} / {}\r", self.current_page + 1, self.current_page + count, page_count);
         for i in self.current_page..self.current_page + count {
             let path = self.get_page_data(i)?;
             pages.push(path);
