@@ -95,7 +95,7 @@ fn try_create_manga(path: &str, app: AppHandle, state: State<Mutex<MangaBook>>) 
     let mut source: Box<dyn PageSource> = path.try_into()?;
     let page_count = source.page_count();
     let ts_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-    let cache_dir = app.path().resolve(format!("cache/{}", ts_ms), tauri::path::BaseDirectory::AppData)?;
+    let cache_dir = app.path().resolve(Path::new("cache").join( format!("{}", ts_ms)), tauri::path::BaseDirectory::AppData)?;
     std::fs::create_dir_all(cache_dir.as_path())?;
     source.set_cache_dir(cache_dir);
     let new_manga = MangaBook::new(source);
