@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -100,6 +100,7 @@ fn try_create_manga(path: &str, app: AppHandle, state: State<Mutex<MangaBook>>) 
     source.set_cache_dir(cache_dir);
     let new_manga = MangaBook::new(source);
     *state.lock().map_err(|e| anyhow::anyhow!("锁中毒: {}", e))? = new_manga;
+    app.emit("toast", "载入漫画成功")?;
     Ok(page_count)
 }
 
@@ -182,7 +183,7 @@ fn refresh(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 }
 
 #[tauri::command]
-fn pick_file(app: tauri::AppHandle) -> Option<String> {
+fn pick_file(app: AppHandle) -> Option<String> {
     let window = app.get_webview_window("main").unwrap();
 
     rfd::FileDialog::new()
@@ -244,7 +245,7 @@ fn load_config(app: AppHandle) -> Config {
             }
         }
     } else {
-        let config = Config::default();
+        let config = Config::preset();
         match std::fs::File::create(config_file_path.as_path()) {
             Ok(mut file) => {
                 eprintln!("新建预设配置文件成功：{}", config_file_path.to_string_lossy());
@@ -318,7 +319,6 @@ pub fn run() {
                     _ => {}
                 }
             });
-
             
             #[cfg(desktop)]
             {

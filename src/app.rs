@@ -3,6 +3,7 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use leptos::*;
+use leptoaster::*;
 
 use web_sys::KeyboardEvent;
 
@@ -53,6 +54,9 @@ struct TextPayload {
 
 #[component]
 pub fn App() -> impl IntoView {
+    provide_toaster();
+    let toaster = StoredValue::new(expect_toaster());    
+
     let (size, set_size) = signal(2_usize);
     let (img_data, set_img_data) = signal(vec![ImageData::default(); size.get_untracked()]);
     let (reading_direction, set_reading_direction) = signal(true);
@@ -247,7 +251,11 @@ pub fn App() -> impl IntoView {
             },
             None => {
                 #[cfg(debug_assertions)]
-                leptos::logging::log!("ev.code = {}", input_action_code);
+                {
+                    let m = format!("ev.code() = {}", input_action_code);
+                    leptos::logging::log!("{}", m);
+                    toaster.read_value().info(m);
+                }
             },
         }
     };
@@ -299,6 +307,8 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
+        <Toaster stacked={false} />
+        <ToastPoster />
         <div class="viewport"
             on:contextmenu=|ev| ev.prevent_default()
             on:mousedown=on_mousedown
@@ -331,6 +341,30 @@ fn extract_paths_from_event(event: JsValue) -> Option<Vec<String>> {
     // 使用 serde 直接反序列化
     let drag_event: DragDropEvent = serde_wasm_bindgen::from_value(event).ok()?;
     Some(drag_event.payload.paths)
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct EventPayload {
+    event: String,
+    payload: String,
+    id: u32,
+}
+
+#[component]
+pub fn ToastPoster() -> impl IntoView {
+    let toaster = expect_toaster();
+
+    // 直接设置事件监听器
+    spawn_local(async move {
+        let closure = Closure::wrap(Box::new(move |event: JsValue| {
+            // 直接提取 event.payload.paths
+            let event: EventPayload = serde_wasm_bindgen::from_value(event).unwrap();
+            toaster.success(event.payload);
+        }) as Box<dyn FnMut(JsValue)>);
+
+        let _ = listen("toast", closure.as_ref().into()).await;
+        closure.forget();
+    });
 }
 
 #[component]
