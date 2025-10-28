@@ -196,22 +196,24 @@ fn pick_file(app: AppHandle) -> Option<String> {
 
 #[tauri::command]
 fn show_guide(app: AppHandle, state: State<Config>) {
-    std::thread::sleep(std::time::Duration::from_millis(10));
     if let Some(window) = app.get_webview_window("guide") {
         let _ = window.set_focus();
     } else {
         let script = state.key_bind.to_replace_script();
-        tauri::WebviewWindowBuilder::new(
-            &app,
-            "guide",
-            tauri::WebviewUrl::App("public/guide.html".into()),
-        )
-        .title("操作指南")
-        .initialization_script(script)
-        .inner_size(600.0, 800.0)
-        .resizable(true)
-        .build()
-        .expect("open guide window");
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            tauri::WebviewWindowBuilder::new(
+                &app,
+                "guide",
+                tauri::WebviewUrl::App("public/guide.html".into()),
+            )
+            .title("操作指南")
+            .initialization_script(script)
+            .inner_size(600.0, 800.0)
+            .resizable(true)
+            .build()
+            .expect("open guide window");
+        });
     }
 }
 
