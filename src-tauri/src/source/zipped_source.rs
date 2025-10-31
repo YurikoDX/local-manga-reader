@@ -16,7 +16,7 @@ pub struct ZippedSource {
     
 impl PageSource for ZippedSource {
     fn set_cache_dir(&mut self, cache_dir: PathBuf) {
-        self.cache_dir = cache_dir
+        self.cache_dir = cache_dir;
     }
 
     fn get_page_data(&mut self, index: usize) -> anyhow::Result<ImageData> {
@@ -58,7 +58,7 @@ impl ZippedSource {
             indice_table.retain(|&index| {
                 let file_name = file_names[index];
                 let ext = Path::new(file_name).extension().unwrap_or_default().to_str().unwrap_or_default().to_ascii_lowercase();
-                SUPPORTED_FORMATS.contains(ext.as_str())
+                SUPPORTED_FORMATS.exact_match(ext)
             });
             indice_table.sort_by_key(|&index| file_names[index]);
             indice_table

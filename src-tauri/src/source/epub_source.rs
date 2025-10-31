@@ -73,14 +73,6 @@ fn extract_img_paths(html: &str, base_path: &Path) -> Vec<PathBuf> {
         }
     }
 
-    // 2. SVG <image>
-    static SVG_IMG_SEL: std::sync::OnceLock<Selector> = std::sync::OnceLock::new();
-    for node in dom.select(SVG_IMG_SEL.get_or_init(|| Selector::parse("image").unwrap())) {
-        if let Some(href) = node.value().attr("href").or_else(|| node.value().attr("xlink:href")) {
-            paths.push(normalize_src(href, base_path));
-        }
-    }
-
     paths
 }
 
