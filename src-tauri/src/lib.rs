@@ -97,7 +97,10 @@ fn try_create_manga(path: &str, app: AppHandle, state: State<Mutex<MangaBook>>) 
     source.set_cache_dir(cache_dir);
     let new_manga = MangaBook::new(source);
     *state.lock().map_err(|e| anyhow::anyhow!("锁中毒: {}", e))? = new_manga;
-    app.emit("toast", "载入漫画成功")?;
+    app.emit("toast", "S载入漫画成功")?;
+    // app.emit("toast", "I载入漫画成功")?;
+    // app.emit("toast", "W载入漫画成功")?;
+    // app.emit("toast", "E载入漫画成功")?;
     Ok(page_count)
 }
 

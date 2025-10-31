@@ -366,7 +366,14 @@ pub fn ToastPoster() -> impl IntoView {
         let closure = Closure::wrap(Box::new(move |event: JsValue| {
             // 直接提取 event.payload.paths
             let event: EventPayload = serde_wasm_bindgen::from_value(event).unwrap();
-            toaster.success(event.payload);
+            let (tag, message) = event.payload.split_at(1);
+            match tag {
+                "S" => toaster.success(message),
+                "I" => toaster.info(message),
+                "W" => toaster.warn(message),
+                "E" => toaster.error(message),
+                _ => unreachable!(),
+            }
         }) as Box<dyn FnMut(JsValue)>);
 
         let _ = listen("toast", closure.as_ref().into()).await;

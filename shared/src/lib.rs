@@ -1,5 +1,6 @@
 use serde::{Serialize, Deserialize};
 use zip::result::ZipError;
+use sevenz_rust2::Error as SevenzError;
 use std::{ffi::OsStr, path::Path};
 
 pub const NEED_PASSWORD: &str = "Password required to decrypt file";
@@ -75,14 +76,21 @@ impl From<anyhow::Result<Vec<ImageData>>> for LoadPageResult {
         match value {
             Ok(v) => LoadPageResult::Success(v),
             Err(e) => {
-                match e.downcast::<ZipError>() {
-                    Ok(zip_error) => {
-                        match zip_error {
-                            ZipError::InvalidPassword => LoadPageResult::NeedPassword,
-                            e => LoadPageResult::Other(e.to_string()),
-                        }
-                    },
-                    Err(e) => LoadPageResult::Other(e.to_string()),
+                if let Some(zip_error) = e.downcast_ref::<ZipError>() {
+                    if let ZipError::InvalidPassword = zip_error {
+                        LoadPageResult::NeedPassword
+                    } else {
+                        LoadPageResult::Other(zip_error.to_string())
+                    }
+                } else if let Some(sevenz_error) = e.downcast_ref::<SevenzError>() {
+                    dbg!(sevenz_error);
+                    if let SevenzError::PasswordRequired | SevenzError::MaybeBadPassword(_) = sevenz_error {
+                        LoadPageResult::NeedPassword
+                    } else {
+                        LoadPageResult::Other(sevenz_error.to_string())
+                    }
+                } else {
+                    LoadPageResult::Other(e.to_string())
                 }
             }
         }
