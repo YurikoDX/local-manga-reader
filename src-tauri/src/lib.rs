@@ -38,7 +38,7 @@ impl MangaBook {
     fn refresh(&mut self, count: usize) -> anyhow::Result<Vec<ImageData>> {
         let mut pages = Vec::with_capacity(count);
         let page_count = self.source.page_count();
-        eprint!(">>> page {} - {} / {}\r", self.current_page + 1, self.current_page + count, page_count);
+        eprint!("\x1b[2K>>> page {} - {} / {}\r", self.current_page + 1, self.current_page + count, page_count);
         for i in self.current_page..self.current_page + count {
             let path = self.get_page_data(i)?;
             pages.push(path);
@@ -46,36 +46,33 @@ impl MangaBook {
         Ok(pages)
     }
 
-    pub fn next_page(&mut self, count: usize) {
-        let len = self.source.page_count();
-        if self.current_page + count < len {
-            self.current_page += count;
-        }
+    pub fn next_page(&mut self, count: usize) ->bool {
+        (self.current_page + count < self.len()).then(|| self.current_page += count).is_some()
     }
 
-    pub fn last_page(&mut self, count: usize) {
-        self.current_page = self.current_page.saturating_sub(count);
+    pub fn last_page(&mut self, count: usize) -> bool {
+        (self.current_page > 0).then(|| self.current_page = self.current_page.saturating_sub(count)).is_some()
     }
 
-    pub fn step_next_page(&mut self) {
-        let len = self.source.page_count();
-        if self.current_page + 1 < len {
-            self.current_page += 1;
-        }
+    pub fn step_next_page(&mut self) -> bool {
+        (self.current_page + 1 < self.len()).then(|| self.current_page += 1).is_some()
     }
 
-    pub fn step_last_page(&mut self) {
-        self.current_page = self.current_page.saturating_sub(1);
+    pub fn step_last_page(&mut self) -> bool {
+        (self.current_page > 0).then(|| self.current_page -= 1).is_some()
     }
 
     pub fn len(&self) -> usize {
         self.source.page_count()
     }
 
+    pub fn current_page(&self) -> usize {
+        self.current_page
+    }
+
     pub fn jump_to(&mut self, index: usize, count: usize) {
-        let len = self.source.page_count();
         self.previous_page = self.current_page;
-        let target = len.saturating_sub(count).min(index);
+        let target = self.len().saturating_sub(count).min(index);
         self.current_page = target;
     }
 
@@ -116,10 +113,18 @@ fn add_password(text: String, state: State<Mutex<MangaBook>>) -> bool {
 }
 
 #[tauri::command]
+fn current_page(state: State<Mutex<MangaBook>>) -> usize {
+    let manga = state.lock().unwrap();
+    manga.current_page()
+}
+
+#[tauri::command]
 fn next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     {
         let mut manga = state.lock().unwrap();
-        manga.next_page(count);
+        if !manga.next_page(count) {
+            return LoadPageResult::Keep;
+        }
     }
     refresh(count, state)
 }
@@ -128,7 +133,9 @@ fn next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 fn last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     {
         let mut manga = state.lock().unwrap();
-        manga.last_page(count);
+        if !manga.last_page(count) {
+            return LoadPageResult::Keep;
+        }
     }
     refresh(count, state)
 }
@@ -137,7 +144,9 @@ fn last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 fn step_next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     {
         let mut manga = state.lock().unwrap();
-        manga.step_next_page();
+        if  !manga.step_next_page() {
+            return LoadPageResult::Keep;
+        }
     }
     refresh(count, state)
 }
@@ -146,7 +155,9 @@ fn step_next(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
 fn step_last(count: usize, state: State<Mutex<MangaBook>>) -> LoadPageResult {
     {
         let mut manga = state.lock().unwrap();
-        manga.step_last_page();
+        if !manga.step_last_page() {
+            return LoadPageResult::Keep;
+        }
     }
     refresh(count, state)
 }
@@ -352,7 +363,7 @@ pub fn run() {
         })
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, read_config, error_test])
+        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, read_config, current_page, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

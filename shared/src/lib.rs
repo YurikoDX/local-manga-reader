@@ -65,6 +65,7 @@ impl From<anyhow::Result<usize>> for CreateMangaResult {
 #[derive(Deserialize, Serialize, Debug)]
 pub enum LoadPageResult {
     Success(Vec<ImageData>),
+    Keep,
     NeedPassword,
     Other(String),
 }

@@ -64,6 +64,7 @@ pub fn App() -> impl IntoView {
     let (page_count, set_page_count) = signal(0_usize);
     let (trie, set_trie) = signal(TrieBuilder::new().build());
     let (scroll_threshold, set_scroll_threshold) = signal(3.);
+    let (current_page, set_current_page) = signal(0);
 
     spawn_local(async move {
         let js = invoke("read_config", JsValue::null()).await;
@@ -93,7 +94,11 @@ pub fn App() -> impl IntoView {
             match resp {
                 LoadPageResult::Success(paths) => {
                     set_img_data.set(paths);
+                    set_current_page.set(
+                        serde_wasm_bindgen::from_value(invoke("current_page", JsValue::null()).await).unwrap()
+                    );
                 },
+                LoadPageResult::Keep => (),
                 LoadPageResult::NeedPassword => {
                     loop {
                         let pwd = match get_input("请输入解压密码：") {
@@ -111,6 +116,7 @@ pub fn App() -> impl IntoView {
                                 set_img_data.set(paths);
                                 break;
                             },
+                            LoadPageResult::Keep => unreachable!(),
                             LoadPageResult::NeedPassword => {
                                 web_sys::window().and_then(|win| win.confirm_with_message("密码错误").ok());
                             },
@@ -118,7 +124,6 @@ pub fn App() -> impl IntoView {
                                 web_sys::window().and_then(|win| win.alert_with_message(format!("其他错误：{}", e).as_str()).ok());
                             },
                         }
-
                     }
                 },
                 LoadPageResult::Other(e) => {
@@ -301,10 +306,11 @@ pub fn App() -> impl IntoView {
                 }
             }
         }) as Box<dyn FnMut(JsValue)>);
-
+ 
         let _ = listen("tauri://drag-drop", closure.as_ref().into()).await;
         closure.forget();
     });
+
 
     view! {
         <Toaster stacked={false} />
@@ -323,6 +329,7 @@ pub fn App() -> impl IntoView {
                 }
             }
         </div>
+        <CounterDisplay current=current_page size=size page_count=page_count />
     }
 }
 
@@ -394,5 +401,26 @@ pub fn ImageViewer(image_data: ImageData) -> impl IntoView {
 
     view! {
         <img src=file_path />
+    }
+}
+
+#[component]
+pub fn CounterDisplay(current: ReadSignal<usize>, size: ReadSignal<usize>, page_count: ReadSignal<usize>) -> impl IntoView {
+    view! {
+        <div
+            class="counter-display"
+            style="position: absolute; top: 10px; right: 10px; padding-left: 6px; padding-right: 6px; min-width: 30px; height: 30px; background-color: gray; border-radius: 5px; display: flex; justify-content: center; align-items: center; color: white; opacity: 80%;"
+        >
+            {move ||
+                {
+                    let (cur, size, total) = (current.get(), size.get(), page_count.get());
+                    if size > 0 {
+                        format!("{} - {} / {}", cur + 1, cur + size, total)
+                    } else {
+                        format!("{} / {}", cur + 1, total)
+                    }
+                }
+            }
+        </div>
     }
 }
