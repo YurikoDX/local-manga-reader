@@ -1,7 +1,5 @@
-use std::fmt::Display;
-
+use std::{collections::HashMap, fmt::Display};
 use serde::{Serialize, Deserialize};
-use trie_rs::map::{TrieBuilder, Trie};
 
 pub trait Preset {
     fn preset() -> Self;
@@ -202,79 +200,79 @@ impl Preset for KeyBind {
     }
 }
 
-impl From<KeyBind> for Trie<u8, InputAction> {
+impl From<KeyBind> for HashMap<String, InputAction> {
     fn from(value: KeyBind) -> Self {
-        let mut trie_builder = TrieBuilder::new();
+        let mut map = HashMap::new();
 
-        for item in value.page_next {
-            trie_builder.push(item.as_str(), InputAction::PageNext);
+        for key in value.page_next {
+            map.insert(key, InputAction::PageNext);
         }
 
         for key in value.page_last {
-            trie_builder.push(key.as_str(), InputAction::PageLast);
+            map.insert(key, InputAction::PageLast);
         }
 
         for key in value.page_left {
-            trie_builder.push(key.as_str(), InputAction::PageLeft);
+            map.insert(key, InputAction::PageLeft);
         }
 
         for key in value.page_right {
-            trie_builder.push(key.as_str(), InputAction::PageRight);
+            map.insert(key, InputAction::PageRight);
         }
 
         for key in value.page_step_next {
-            trie_builder.push(key.as_str(), InputAction::PageStepNext);
+            map.insert(key, InputAction::PageStepNext);
         }
 
         for key in value.page_step_last {
-            trie_builder.push(key.as_str(), InputAction::PageStepLast);
+            map.insert(key, InputAction::PageStepLast);
         }
 
         for key in value.page_step_left {
-            trie_builder.push(key.as_str(), InputAction::PageStepLeft);
+            map.insert(key, InputAction::PageStepLeft);
         }
 
         for key in value.page_step_right {
-            trie_builder.push(key.as_str(), InputAction::PageStepRight);
+            map.insert(key, InputAction::PageStepRight);
         }
 
         for key in value.page_home {
-            trie_builder.push(key.as_str(), InputAction::PageHome);
+            map.insert(key, InputAction::PageHome);
         }
 
         for key in value.page_end {
-            trie_builder.push(key.as_str(), InputAction::PageEnd);
+            map.insert(key, InputAction::PageEnd);
         }
 
         for key in value.page_jump {
-            trie_builder.push(key.as_str(), InputAction::PageJump);
+            map.insert(key, InputAction::PageJump);
         }
 
         for key in value.page_count_minus {
-            trie_builder.push(key.as_str(), InputAction::PageCountMinus);
+            map.insert(key, InputAction::PageCountMinus);
         }
 
         for key in value.page_count_plus {
-            trie_builder.push(key.as_str(), InputAction::PageCountPlus);
+            map.insert(key, InputAction::PageCountPlus);
         }
 
         for key in value.reverse {
-            trie_builder.push(key.as_str(), InputAction::ReverseReading);
+            map.insert(key, InputAction::ReverseReading);
         }
 
         for key in value.open {
-            trie_builder.push(key.as_str(), InputAction::Open);
+            map.insert(key, InputAction::Open);
         }
 
         for key in value.fullscreen {
-            trie_builder.push(key.as_str(), InputAction::Fullscreen);
+            map.insert(key, InputAction::Fullscreen);
         }
 
         for key in value.show_help {
-            trie_builder.push(key.as_str(), InputAction::ShowHelp);
+            map.insert(key, InputAction::ShowHelp);
         }
         
-        trie_builder.build()
+        map
     }
 }
 

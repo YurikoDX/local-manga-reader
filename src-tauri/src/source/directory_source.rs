@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::io;
 
-use super::{PageCache, PageSource, FileBytes, SUPPORTED_FORMATS};
+use super::{PageCache, PageSource, FileBytes, check_valid_ext};
 
 pub struct DirectorySource{
     source_dir: PathBuf,
@@ -44,10 +44,16 @@ impl PageSource for DirectorySource {
 impl DirectorySource {
     pub fn new(dir_path: impl AsRef<Path>) -> io::Result<Self> {
         let source_dir = dir_path.as_ref().to_path_buf();
-        let mut img_names: Vec<OsString> = std::fs::read_dir(dir_path.as_ref())?.filter_map(|x| x.ok().and_then(|entry| {
-            let ext = entry.path().extension().unwrap_or_default().to_str().unwrap_or_default().to_ascii_lowercase();
-            SUPPORTED_FORMATS.exact_match(ext).then(|| entry.file_name())
-        })).collect();
+        let mut img_names: Vec<OsString> = std::fs::read_dir(dir_path.as_ref())?
+            .filter_map(|x| x.ok().and_then(|entry| {
+                entry.file_type()
+                    .is_ok_and(|file_type| 
+                        file_type.is_file()
+                    )
+                    .then(|| entry.file_name())
+            }))
+            .filter(|file_name| check_valid_ext(file_name))
+            .collect();
         img_names.sort_unstable();
         let cache_dir = Default::default();
         let caches: Vec<Option<PageCache>> = (0..img_names.len()).map(|_| None).collect();
