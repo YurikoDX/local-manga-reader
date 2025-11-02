@@ -416,7 +416,7 @@ pub fn CounterDisplay(current: ReadSignal<usize>, size: ReadSignal<usize>, page_
             {move ||
                 {
                     let (cur, size, total) = (current.get(), size.get(), page_count.get());
-                    if size > 0 {
+                    if size > 1 {
                         format!("{} - {} / {}", cur + 1, cur + size, total)
                     } else {
                         format!("{} / {}", cur + 1, total)
