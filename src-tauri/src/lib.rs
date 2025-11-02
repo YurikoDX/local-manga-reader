@@ -79,10 +79,6 @@ impl MangaBook {
     pub fn add_password(&mut self, pwd: String) -> bool {
         self.source.add_password(pwd.into_bytes())
     }
-
-    pub fn page_count(&self) -> usize {
-        self.source.page_count()
-    }
 }
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -284,7 +280,7 @@ fn load_config(app: AppHandle) -> Config {
 
 #[tauri::command]
 fn update_page_count(state: State<Mutex<MangaBook>>) -> usize {
-    state.lock().unwrap().page_count()
+    state.lock().unwrap().len()
 }
 
 #[tauri::command]
