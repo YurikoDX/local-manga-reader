@@ -8,15 +8,16 @@
 ## 使用
 
 **首次运行**  
-应用将自动创建 `config.toml` 文件，路径如下：  
-Windows：`%APPDATA%\io.github.yurikodx.local-manga-reader`  
-Linux / macOS：`$HOME/.local/share/io.github.yurikodx.local-manga-reader`
+    应用将自动创建 `config.toml` 文件，路径如下：  
+    Windows：`%APPDATA%\io.github.yurikodx.local-manga-reader`  
+    Linux：`$HOME/.local/share/io.github.yurikodx.local-manga-reader`
 
-**编辑配置文件**  
-用任意文本编辑器打开 `config.toml`，按需修改设置。
+**（可选）编辑配置文件**  
+    用任意文本编辑器打开 `config.toml`，按需修改设置。重启应用以使更改生效。
 
-**重启**  
-重启应用以使更改生效。
+**载入漫画**  
+    启动后点击空白页或按打开文件的按键（默认字母O）。支持拖拽。
+    对于非压缩包或电子书格式的散装图片只支持拖拽文件夹。启动帮助页面查看键位（默认字母H）。
 
 ## 从源码构建
 
@@ -47,6 +48,13 @@ cargo install --locked trunk
 ```
 rustup target add wasm32-unknown-unknown
 ```
+### 构建
+```
+git clone https://github.com/YurikoDX/local-manga-reader.git
+cd local-manga-reader
+cargo tauri build
+```
+
 ## 常见问题
 
 ### 构建报错 `Error Failed to parse version`
@@ -64,8 +72,9 @@ Error Failed to parse version `2` for crate `tauri-plugin-opener`
 
 ## 待办清单
 
-- [ ] 优化 7z 格式支持
+- [x] 优化 7z 格式支持
 - [ ] 隐藏当前页码
+- [ ] 预加载页面
 - [ ] 书签功能
 - [ ] 为不同漫画保存进度与阅读顺序
 - [ ] 支持更多格式

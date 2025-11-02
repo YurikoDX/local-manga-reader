@@ -11,14 +11,16 @@ A lean, local desktop client for browsing your local manga collection.
 
 **First run**  
    The app will automatically create a `config.toml` file in  
-  Windows: `%APPDATA%\io.github.yurikodx.local-manga-reader`  
-  Linux / macOS: `$HOME/.local/share/io.github.yurikodx.local-manga-reader`
+   Windows: `%APPDATA%\io.github.yurikodx.local-manga-reader`  
+   Linux: `$HOME/.local/share/io.github.yurikodx.local-manga-reader`
 
-**Edit the config file**  
-   Open `config.toml` with any text editor and adjust the settings as needed.
+**(Optional) Edit the config file**  
+   Open `config.toml` with any text editor and adjust the settings as needed.Restart the application for changes to take effect.
 
-**Restart**  
-   Restart the application for changes to take effect.
+**Load manga**  
+   After launch, click the blank page or press the "open file" key (default: letter O). Drag-and-drop is also supported.
+   For loose images (non-archive or non-e-book formats), only folder drag-and-drop is allowed.
+   Press the default key H to open the help page and view all shortcuts.
 
 ## Build from source
 
@@ -49,6 +51,13 @@ cargo install --locked trunk
 ```
 rustup target add wasm32-unknown-unknown
 ```
+### Build
+```
+git clone https://github.com/YurikoDX/local-manga-reader.git
+cd local-manga-reader
+cargo tauri build
+```
+
 ## FAQ
 
 ### Build error `Error Failed to parse version`
@@ -67,8 +76,9 @@ The error **re-appears** after running `cargo clean` and removing `Cargo.lock`.
 
 ## Todo List
 
-- [ ] Optimize 7z format support
+- [x] Optimize 7z format support
 - [ ] Hide current page count
+- [ ] Preload pages
 - [ ] Bookmark feature
 - [ ] Save progress and reading order for each manga
 - [ ] Support more formats

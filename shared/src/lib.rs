@@ -6,6 +6,20 @@ use std::{ffi::OsStr, path::Path};
 pub const NEED_PASSWORD: &str = "Password required to decrypt file";
 const A4_ASPECT_RATIO: f64 = 210. / 297.;  // Source: public/no_data.svg
 
+pub const EXT_ZIP:  &str = "zip";
+pub const EXT_EPUB: &str = "epub";
+pub const EXT_7Z:   &str = "7z";
+pub const SUPPORTED_FILE_FORMATS: &[&str; 3] = &[EXT_ZIP, EXT_EPUB, EXT_7Z];
+pub const SUPPORTED_IMG_FORMATS: &[&str; 7] = &[
+    "jpg",
+    "jpeg",
+    "png",
+    "bmp",
+    "gif",
+    "webp",
+    "ico",
+];
+
 pub mod config;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]

@@ -7,7 +7,7 @@ use std::sync::Mutex;
 pub mod source;
 use source::{PageSource, NoSource};
 
-use shared::{CreateMangaResult, LoadPageResult, ImageData};
+use shared::{CreateMangaResult, LoadPageResult, ImageData, SUPPORTED_FILE_FORMATS};
 use shared::config::{Config, Preset};
 
 struct MangaBook {
@@ -78,6 +78,10 @@ impl MangaBook {
 
     pub fn add_password(&mut self, pwd: String) -> bool {
         self.source.add_password(pwd.into_bytes())
+    }
+
+    pub fn page_count(&self) -> usize {
+        self.source.page_count()
     }
 }
 
@@ -202,7 +206,7 @@ fn pick_file(app: AppHandle) -> Option<String> {
 
     rfd::FileDialog::new()
         .set_title("选择漫画")
-        .add_filter("支持的格式", &["zip", "epub"])
+        .add_filter("支持的格式", SUPPORTED_FILE_FORMATS)
         .set_parent(&window)
         .pick_file()
         .and_then(|p| Some(p.to_string_lossy().into_owned()))
@@ -276,6 +280,11 @@ fn load_config(app: AppHandle) -> Config {
 
         config
     }
+}
+
+#[tauri::command]
+fn update_page_count(state: State<Mutex<MangaBook>>) -> usize {
+    state.lock().unwrap().page_count()
 }
 
 #[tauri::command]
@@ -366,7 +375,7 @@ pub fn run() {
         })
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, read_config, current_page, error_test])
+        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, read_config, current_page, update_page_count, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

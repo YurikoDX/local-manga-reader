@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::fs::File;
 use std::io;
 
-use super::{PageCache, PageSource, FileBytes, SUPPORTED_FORMATS, ImageData};
+use super::{PageCache, PageSource, FileBytes, ImageData, check_valid_ext};
 
 pub struct ZippedSource {
     passwords: HashSet<Vec<u8>>,
@@ -50,18 +50,18 @@ impl ZippedSource {
     pub fn new(file_path: impl AsRef<Path>) -> io::Result<Self> {
         let file = File::open(file_path.as_ref())?;
         let passwords = Default::default();
-        let zip_archive = ZipArchive::new(file)?;
+        let mut zip_archive = ZipArchive::new(file)?;
         let cache_dir = Default::default();
-        let indice_table = {
-            let file_names: Vec<&str> = zip_archive.file_names().collect();
-            let mut indice_table: Vec<usize> = (0..zip_archive.len()).collect();
-            indice_table.retain(|&index| {
-                let file_name = file_names[index];
-                let ext = Path::new(file_name).extension().unwrap_or_default().to_str().unwrap_or_default().to_ascii_lowercase();
-                SUPPORTED_FORMATS.exact_match(ext)
-            });
-            indice_table.sort_by_key(|&index| file_names[index]);
-            indice_table
+        let indice_table: Vec<usize> = {
+            let mut indice_file_name_table: Vec<(usize, String)> = (0..zip_archive.len())
+                .filter_map(|index| {
+                    let entry = zip_archive.by_index(index).ok()?;
+                    (entry.is_file() && check_valid_ext(entry.name()))
+                    .then_some((index, entry.name().to_string()))
+                })
+                .collect();
+            indice_file_name_table.sort_by(|a, b| a.1.cmp(&b.1));
+            indice_file_name_table.into_iter().map(|(index, _)| index).collect()
         };
 
         let caches: Vec<Option<PageCache>> = (0..=indice_table.iter().max().copied().unwrap_or(0)).map(|_| None).collect();

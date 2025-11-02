@@ -1,6 +1,7 @@
+use js_sys::{Object, Reflect};
 use leptos::task::spawn_local;
 use leptos::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use wasm_bindgen::prelude::*;
 use leptos::*;
 use leptoaster::*;
@@ -9,15 +10,11 @@ use web_sys::KeyboardEvent;
 
 use shared::{CreateMangaResult, LoadPageResult, ImageData};
 use shared::config::{Config, InputAction};
-use trie_rs::map::{Trie, TrieBuilder};
+use std::collections::HashMap;
 
-lazy_static::lazy_static! {
-    static ref SUPPORTED_FILE_FORMAT: trie_rs::Trie<u8> = [
-        "zip",
-        "epub",
-        "7z",
-    ].into_iter().collect();
-}
+// lazy_static::lazy_static! {
+//     static ref SUPPORTED_FILE_FORMAT: HashSet<&'static str> = shared::SUPPORTED_FILE_FORMATS.iter().copied().collect();
+// }
 
 #[wasm_bindgen]
 extern "C" {
@@ -62,7 +59,7 @@ pub fn App() -> impl IntoView {
     let (reading_direction, set_reading_direction) = signal(true);
     let (empty_manga, set_empty_manga) = signal(true);
     let (page_count, set_page_count) = signal(0_usize);
-    let (trie, set_trie) = signal(TrieBuilder::new().build());
+    let (cmd_map, set_cmd_map) = signal(HashMap::new());
     let (scroll_threshold, set_scroll_threshold) = signal(3.);
     let (current_page, set_current_page) = signal(0);
 
@@ -71,8 +68,8 @@ pub fn App() -> impl IntoView {
         let config = serde_wasm_bindgen::from_value::<Config>(js).unwrap();
         let key_bind = config.key_bind;
         leptos::logging::log!("{:?}", key_bind);
-        let trie: Trie<u8, InputAction> = key_bind.into();
-        set_trie.set(trie);
+        let map: HashMap<_, _> = key_bind.into();
+        set_cmd_map.set(map);
         set_reading_direction.set(config.reading_from_right_to_left);
         set_scroll_threshold.set(config.scroll_threshold);
     });
@@ -130,6 +127,10 @@ pub fn App() -> impl IntoView {
                     web_sys::window().and_then(|win| win.alert_with_message(format!("错误：{}", e).as_str()).ok());
                 },
             }
+            if page_count.get_untracked() == 0 {
+                let resp: usize = serde_wasm_bindgen::from_value(invoke("update_page_count", JsValue::null()).await).unwrap();
+                set_page_count.set(resp);
+            }
         })
     };
 
@@ -181,7 +182,7 @@ pub fn App() -> impl IntoView {
     };
 
     let action_handler = move |input_action_code: &str| {
-        match trie.with(|t| t.exact_match(input_action_code).copied()) {
+        match cmd_map.with(|x| x.get(input_action_code).copied()) {
             Some(input_action) => match input_action {
                 InputAction::PageNext => load_and_show("next"),
                 InputAction::PageLast => load_and_show("last"),
@@ -300,8 +301,8 @@ pub fn App() -> impl IntoView {
     spawn_local(async move {
         let closure = Closure::wrap(Box::new(move |event: JsValue| {
             // 直接提取 event.payload.paths
-            if let Some(paths_array) = extract_paths_from_event(event) {
-                if let Some(path) = paths_array.into_iter().nth(0) {
+            if let Some(payload) = extract_payload_from_event::<DragDropPayload>(event) {
+                if let Some(path) = payload.paths.into_iter().nth(0) {
                     create_manga(path);
                 }
             }
@@ -310,7 +311,6 @@ pub fn App() -> impl IntoView {
         let _ = listen("tauri://drag-drop", closure.as_ref().into()).await;
         closure.forget();
     });
-
 
     view! {
         <Toaster stacked={false} />
@@ -334,20 +334,17 @@ pub fn App() -> impl IntoView {
 }
 
 #[derive(Deserialize)]
-struct DragDropEvent {
-    payload: DragDropPayload,
-}
-
-#[derive(Deserialize)]
 struct DragDropPayload {
     paths: Vec<String>,
 }
 
-// 辅助函数：从事件对象中提取 paths
-fn extract_paths_from_event(event: JsValue) -> Option<Vec<String>> {
+// 辅助函数：从事件对象中提取 payload
+fn extract_payload_from_event<'de, T: DeserializeOwned>(event: JsValue) -> Option<T> {
     // 使用 serde 直接反序列化
-    let drag_event: DragDropEvent = serde_wasm_bindgen::from_value(event).ok()?;
-    Some(drag_event.payload.paths)
+    let obj: Object = Object::from(event);
+    let payload  = Reflect::get(&obj, &"payload".into()).ok()?;
+    let payload: T = serde_wasm_bindgen::from_value(payload).ok()?;
+    Some(payload)
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -361,12 +358,10 @@ struct EventPayload {
 pub fn ToastPoster() -> impl IntoView {
     let toaster = expect_toaster();
 
-    // 直接设置事件监听器
     spawn_local(async move {
         let closure = Closure::wrap(Box::new(move |event: JsValue| {
-            // 直接提取 event.payload.paths
-            let event: EventPayload = serde_wasm_bindgen::from_value(event).unwrap();
-            let (tag, message) = event.payload.split_at(1);
+            let payload: String = extract_payload_from_event(event).unwrap();
+            let (tag, message) = payload.split_at(1);
             match tag {
                 "S" => toaster.success(message),
                 "I" => toaster.info(message),
