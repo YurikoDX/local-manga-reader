@@ -62,6 +62,7 @@ pub fn App() -> impl IntoView {
     let (cmd_map, set_cmd_map) = signal(HashMap::new());
     let (scroll_threshold, set_scroll_threshold) = signal(3.);
     let (current_page, set_current_page) = signal(0);
+    let (show_page_number, set_show_page_number) = signal(false);
 
     spawn_local(async move {
         let js = invoke("read_config", JsValue::null()).await;
@@ -72,6 +73,7 @@ pub fn App() -> impl IntoView {
         set_cmd_map.set(map);
         set_reading_direction.set(config.reading_from_right_to_left);
         set_scroll_threshold.set(config.scroll_threshold);
+        set_show_page_number.set(config.show_page_number);
     });
 
     let get_input = |prompt: &str| -> Option<String> {
@@ -254,6 +256,9 @@ pub fn App() -> impl IntoView {
                         invoke("show_guide", JsValue::null()).await;
                     });
                 },
+                InputAction::HidePageNumber => {
+                    set_show_page_number.set(!show_page_number.get_untracked());
+                },
             },
             None => {
                 #[cfg(debug_assertions)]
@@ -329,7 +334,9 @@ pub fn App() -> impl IntoView {
                 }
             }
         </div>
-        <CounterDisplay current=current_page size=size page_count=page_count />
+        <Show when=move || show_page_number.get()>
+            <CounterDisplay current=current_page size=size page_count=page_count />
+        </Show>
     }
 }
 

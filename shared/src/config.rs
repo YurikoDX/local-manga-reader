@@ -9,6 +9,7 @@ pub trait Preset {
 pub struct Config {
     pub reading_from_right_to_left: bool,
     pub scroll_threshold: f64,
+    pub show_page_number: bool,
     pub key_bind: KeyBind,
 }
 
@@ -16,11 +17,13 @@ impl Preset for Config {
     fn preset() -> Self {
         let reading_from_right_to_left = true;
         let scroll_threshold = 3.0;
+        let show_page_number = true;
         let key_bind = Preset::preset();
 
         Self {
             reading_from_right_to_left,
             scroll_threshold,
+            show_page_number,
             key_bind
         }        
     }
@@ -59,6 +62,7 @@ pub struct KeyBind {
     open: Vec<String>,
     fullscreen: Vec<String>,
     show_help: Vec<String>,
+    hide_page_number: Vec<String>,
 }
 
 impl KeyBind {
@@ -86,6 +90,8 @@ impl KeyBind {
             &self.reverse,         //13
             &self.open,            //14
             &self.fullscreen,      //15
+            &self.show_help,       //16
+            &self.hide_page_number,//17
         ];
 
         for (idx, keys) in slots.iter().enumerate() {
@@ -178,6 +184,10 @@ impl Preset for KeyBind {
             String::from("KeyH"),
         ];
 
+        let hide_page_number = vec![
+            String::from("KeyI"),
+        ];
+
         Self {
             page_next,
             page_last,
@@ -196,6 +206,7 @@ impl Preset for KeyBind {
             open,
             fullscreen,
             show_help,
+            hide_page_number,
         }
     }
 }
@@ -271,7 +282,11 @@ impl From<KeyBind> for HashMap<String, InputAction> {
         for key in value.show_help {
             map.insert(key, InputAction::ShowHelp);
         }
-        
+
+        for key in value.hide_page_number {
+            map.insert(key, InputAction::HidePageNumber);
+        }
+
         map
     }
 }
@@ -296,4 +311,5 @@ pub enum InputAction {
     Open = 14,
     Fullscreen = 15,
     ShowHelp = 16,
+    HidePageNumber = 17,
 }
