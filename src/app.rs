@@ -265,7 +265,7 @@ pub fn App() -> impl IntoView {
                 {
                     let m = format!("ev.code() = {}", input_action_code);
                     leptos::logging::log!("{}", m);
-                    toaster.read_value().info(m);
+                    toaster.with_value(|x| x.info(m));
                 }
             },
         }
