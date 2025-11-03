@@ -9,7 +9,8 @@ const A4_ASPECT_RATIO: f64 = 210. / 297.;  // Source: public/no_data.svg
 pub const EXT_ZIP:  &str = "zip";
 pub const EXT_EPUB: &str = "epub";
 pub const EXT_7Z:   &str = "7z";
-pub const SUPPORTED_FILE_FORMATS: &[&str; 3] = &[EXT_ZIP, EXT_EPUB, EXT_7Z];
+pub const EXT_PDF:  &str = "pdf";
+pub const SUPPORTED_FILE_FORMATS: &[&str; 4] = &[EXT_ZIP, EXT_EPUB, EXT_7Z, EXT_PDF];
 pub const SUPPORTED_IMG_FORMATS: &[&str; 7] = &[
     "jpg",
     "jpeg",

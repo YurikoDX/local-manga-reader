@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, Write, Cursor};
 use std::path::{Path, PathBuf};
@@ -17,6 +18,9 @@ use directory_source::DirectorySource;
 mod sevenz_source;
 use sevenz_source::SevenzSource;
 
+mod pdf_source;
+use pdf_source::PdfSource;
+
 pub type FileBytes = Vec<u8>;
 
 lazy_static::lazy_static! {
@@ -24,8 +28,12 @@ lazy_static::lazy_static! {
 }
 
 pub fn check_valid_ext(file_name: impl AsRef<Path>) -> bool {
-    let ext = file_name.as_ref().extension().unwrap_or_default().to_ascii_lowercase();
-    SUPPORTED_IMG_FORMATS_MAP.contains(ext.to_str().unwrap_or_default())
+    let path = file_name.as_ref();
+    path.iter().nth(0).unwrap_or_default() != OsStr::new("__MACOSX")
+    && {
+        let ext = path.extension().unwrap_or_default().to_ascii_lowercase();
+        SUPPORTED_IMG_FORMATS_MAP.contains(ext.to_str().unwrap_or_default())
+    }
 }
 
 pub fn get_aspect_ratio(content: impl AsRef<[u8]>) -> f64 {
@@ -106,6 +114,7 @@ impl TryFrom<&Path> for Box<dyn PageSource> {
                         EXT_ZIP => Ok(Box::new(ZippedSource::new(path)?)),
                         EXT_EPUB => Ok(Box::new(EpubSource::new(path)?)),
                         EXT_7Z => Ok(Box::new(SevenzSource::new(path)?)),
+                        EXT_PDF => Ok(Box::new(PdfSource::new(path)?)),
                         _ => Err(anyhow::anyhow!("不支持的文件格式")),
                     },
                     None => Err(anyhow::anyhow!("非法的后缀名")),

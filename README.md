@@ -73,11 +73,13 @@ After a successful compilation it will not show again.
 If you’d like to suppress it now, simply run cargo build once inside `src-tauri/` before running `cargo tauri dev`.
 The error **re-appears** after running `cargo clean` and removing `Cargo.lock`.
 
+## Acknowledgments
+PDF processing logic referenced from [Vortex](https://github.com/omkar-mohanty/vortex/tree/e9516d10071ecc83a68b0fac72bb171beadcef5b)
 
 ## Todo List
 
 - [x] Optimize 7z format support
-- [ ] Hide current page count
+- [x] Hide current page count
 - [ ] Preload pages
 - [ ] Bookmark feature
 - [ ] Save progress and reading order for each manga
