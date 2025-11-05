@@ -40,5 +40,4 @@ urlencoding = "2.1"
 image = "0.25.8"
 rfd = "0.15.4"
 trie-rs = "0.4.2"
-pdf = "0.9.0"
 shared = { path = "../shared" }

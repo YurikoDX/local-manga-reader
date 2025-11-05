@@ -68,13 +68,12 @@ Error Failed to parse version `2` for crate `tauri-plugin-opener`
 此错误仅在**首次**运行 `cargo tauri dev` 时出现，成功编译一次后不再显示。  
 如想立即消除，可先在 `src-tauri/` 内执行一次 `cargo build`，再运行 `cargo tauri dev`。  
 执行 `cargo clean` 并删除 `Cargo.lock` 后，该错误会**再次出现**。
-## 致谢
-PDF 处理逻辑参考自 [Vortex](https://github.com/omkar-mohanty/vortex/tree/e9516d10071ecc83a68b0fac72bb171beadcef5b) 项目
+
 
 ## 待办清单
 
 - [x] 优化 7z 格式支持
-- [x] 隐藏当前页码
+- [ ] 隐藏当前页码
 - [ ] 预加载页面
 - [ ] 书签功能
 - [ ] 为不同漫画保存进度与阅读顺序
