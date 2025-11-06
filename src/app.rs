@@ -63,17 +63,22 @@ pub fn App() -> impl IntoView {
     let (scroll_threshold, set_scroll_threshold) = signal(3.);
     let (current_page, set_current_page) = signal(0);
     let (show_page_number, set_show_page_number) = signal(false);
+    let (toaster_loaded, set_toaster_loaded) = signal(false);
 
-    spawn_local(async move {
-        let js = invoke("read_config", JsValue::null()).await;
-        let config = serde_wasm_bindgen::from_value::<Config>(js).unwrap();
-        let key_bind = config.key_bind;
-        leptos::logging::log!("{:?}", key_bind);
-        let map: HashMap<_, _> = key_bind.into();
-        set_cmd_map.set(map);
-        set_reading_direction.set(config.reading_from_right_to_left);
-        set_scroll_threshold.set(config.scroll_threshold);
-        set_show_page_number.set(config.show_page_number);
+    Effect::new(move || {
+        if toaster_loaded.get() {
+            spawn_local(async move {
+                let js = invoke("load_config", JsValue::null()).await;
+                let config = serde_wasm_bindgen::from_value::<Config>(js).unwrap();
+                let key_bind = config.key_bind;
+                leptos::logging::log!("{:?}", key_bind);
+                let map: HashMap<_, _> = key_bind.into();
+                set_cmd_map.set(map);
+                set_reading_direction.set(config.reading_from_right_to_left);
+                set_scroll_threshold.set(config.scroll_threshold);
+                set_show_page_number.set(config.show_page_number);
+            });
+        }
     });
 
     let get_input = |prompt: &str| -> Option<String> {
@@ -319,7 +324,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         <Toaster stacked={false} />
-        <ToastPoster />
+        <ToastPoster set_toaster_loaded=set_toaster_loaded />
         <div class="viewport"
             on:contextmenu=|ev| ev.prevent_default()
             on:mousedown=on_mousedown
@@ -327,9 +332,9 @@ pub fn App() -> impl IntoView {
         >
             {move || {
                     let v = img_data.get();
-                    let aspect_ratio: f64 = v.iter().map(|x| x.aspect_ratio()).sum();
-                    let width = (1000. * aspect_ratio) as u32;
-                    let flag = reading_direction.get();
+                let aspect_ratio: f64 = v.iter().map(|x| x.aspect_ratio()).sum();
+                let width = (1000. * aspect_ratio) as u32;
+                let flag = reading_direction.get();
                     view! { <MultiImageViewer image_datas=v width=width reverse=flag /> }
                 }
             }
@@ -354,15 +359,8 @@ fn extract_payload_from_event<'de, T: DeserializeOwned>(event: JsValue) -> Optio
     Some(payload)
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct EventPayload {
-    event: String,
-    payload: String,
-    id: u32,
-}
-
 #[component]
-pub fn ToastPoster() -> impl IntoView {
+pub fn ToastPoster(set_toaster_loaded: WriteSignal<bool>) -> impl IntoView {
     let toaster = expect_toaster();
 
     spawn_local(async move {
@@ -380,6 +378,7 @@ pub fn ToastPoster() -> impl IntoView {
 
         let _ = listen("toast", closure.as_ref().into()).await;
         closure.forget();
+        set_toaster_loaded.set(true);
     });
 }
 
