@@ -6,7 +6,7 @@ authors = ["you"]
 edition = "2021"
 
 [profile.dev]
-opt-level = 0
+opt-level = 3
 debug = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -39,5 +39,6 @@ path-clean = "1.0"
 urlencoding = "2.1"
 image = "0.25.8"
 rfd = "0.15.4"
-trie-rs = "0.4.2"
+hayro = { version = "0.4.0", features = ["jpeg2000"] }
+hayro-interpret = { version = "0.4.0", features = ["jpeg2000"] }
 shared = { path = "../shared" }
