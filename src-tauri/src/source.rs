@@ -17,6 +17,9 @@ use directory_source::DirectorySource;
 mod sevenz_source;
 use sevenz_source::SevenzSource;
 
+mod pdf_source;
+use pdf_source::PdfSource;
+
 pub type FileBytes = Vec<u8>;
 
 lazy_static::lazy_static! {
@@ -106,6 +109,7 @@ impl TryFrom<&Path> for Box<dyn PageSource> {
                         EXT_ZIP => Ok(Box::new(ZippedSource::new(path)?)),
                         EXT_EPUB => Ok(Box::new(EpubSource::new(path)?)),
                         EXT_7Z => Ok(Box::new(SevenzSource::new(path)?)),
+                        EXT_PDF => Ok(Box::new(PdfSource::new(path)?)),
                         _ => Err(anyhow::anyhow!("不支持的文件格式")),
                     },
                     None => Err(anyhow::anyhow!("非法的后缀名")),
