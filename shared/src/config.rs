@@ -7,6 +7,7 @@ pub trait Preset {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
+    #[serde(default)]
     pub reading_from_right_to_left: bool,
     pub scroll_threshold: f64,
     pub show_page_number: bool,

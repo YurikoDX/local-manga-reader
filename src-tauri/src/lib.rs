@@ -209,11 +209,12 @@ fn pick_file(app: AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
-fn show_guide(app: AppHandle, state: State<Config>) {
+fn show_guide(app: AppHandle, state: State<Mutex<Config>>) {
+    let config = state.lock().unwrap();
     if let Some(window) = app.get_webview_window("guide") {
         let _ = window.set_focus();
     } else {
-        let script = state.key_bind.to_replace_script();
+        let script = config.key_bind.to_replace_script();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(10));
             tauri::WebviewWindowBuilder::new(
@@ -238,54 +239,69 @@ fn focus_window(app: AppHandle) {
     window.set_focus().unwrap();
 }
 
-fn load_config(app: AppHandle) -> Config {
+#[tauri::command]
+fn load_config(app: AppHandle, state: State<Mutex<Config>>) -> Config {
     let app_data = app.path().resolve("", tauri::path::BaseDirectory::AppData).expect("无法访问 AppData 目录");
     std::fs::create_dir_all(app_data.as_path()).expect("创建 AppData 目录失败");
     let config_file_path = app_data.join("config.toml");
-    if config_file_path.is_file() {
+    let (config, m) = if config_file_path.is_file() {
         match std::fs::read_to_string(config_file_path.as_path()) {
-            Ok(s) => match s.as_str().try_into() {
+            Ok(s) => match Config::try_from(s.as_str()) {
                 Ok(config) => {
-                    eprintln!("读取配置文件成功。");
+                    let m = "S读取配置文件成功";
+                    eprintln!("{}", m);
                     std::io::stderr().flush().unwrap();
-                    config
+                    (config, m)
                 },
                 Err(e) => {
-                    eprintln!("反序列化配置文件失败，将使用预设配置：{}", e);
-                    Preset::preset()
+                    let m = "W反序列化配置文件失败，将使用预设配置";
+                    eprintln!("{}：{}", m, e);
+                    (Preset::preset(), m)
                 }
             },
             Err(e) => {
-                eprintln!("读取配置文件失败，将使用预设配置：{}", e);
-                Preset::preset()
+                let m = "W读取配置文件失败，将使用预设配置";
+                eprintln!("{}：{}", m, e);
+                (Preset::preset(), m)
             }
         }
     } else {
         let config = Config::preset();
-        match std::fs::File::create(config_file_path.as_path()) {
+        let m = match std::fs::File::create(config_file_path.as_path()) {
             Ok(mut file) => {
                 eprintln!("新建预设配置文件成功：{}", config_file_path.to_string_lossy());
                 let s = config.to_string();
                 match file.write_all(s.as_bytes()) {
-                    Ok(()) => eprintln!("写入预设配置文件。"),
-                    Err(e) => eprintln!("写入预设配置文件失败： {}", e),
+                    Ok(()) => {
+                        let m = "S写入预设配置文件。";
+                        eprintln!("{}", m);
+                        m
+                    },
+                    Err(e) => {
+                        let m = "W写入预设配置文件失败";
+                        eprintln!("{}： {}", m, e);
+                        m
+                    },
                 }
             },
-            Err(e) => eprintln!("新建预设配置文件失败： {}", e),
-        }
+            Err(e) => {
+                let m = "W新建预设配置文件失败";
+                eprintln!("{}： {}", m, e);
+                m
+            },
+        };
 
-        config
-    }
+        (config, m)
+    };
+
+    app.emit("toast", m).unwrap();
+    *state.lock().unwrap() = config.clone();
+    config
 }
 
 #[tauri::command]
 fn update_page_count(state: State<Mutex<MangaBook>>) -> usize {
     state.lock().unwrap().len()
-}
-
-#[tauri::command]
-fn read_config(state: State<Config>) -> Config {
-    state.inner().clone()
 }
 
 #[tauri::command]
@@ -298,11 +314,9 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             use tauri::WindowEvent;
-            // use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent};
-            // use global_hotkey::HotKeyState;
 
-            let config = load_config(app.handle().clone());
-            app.manage(config);
+            // let config = load_config(app.handle().clone());
+            app.manage(Mutex::new(Config::default()));
 
             let main_win = app.get_webview_window("main").unwrap(); // 主窗口 label=main
             let app_handle = app.handle().clone();
@@ -352,14 +366,12 @@ pub fn run() {
                         .with_handler(|app, shortcut, event| {
                             if event.state == ShortcutState::Pressed  {
                                 if shortcut.matches(Modifiers::empty(), Code::Insert) {
-                                    // let _ = app.emit("shortcut-event", "Ctrl+D triggered");
                                     let window = app.get_webview_window("main").unwrap();
                                     if window.is_visible().unwrap() {
                                         window.hide().unwrap();
                                     } else {
                                         window.show().unwrap();
                                     }
-                                    
                                 }
                             }
                         })
@@ -371,7 +383,7 @@ pub fn run() {
         })
         .manage(Mutex::new(MangaBook::default()))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, read_config, current_page, update_page_count, error_test])
+        .invoke_handler(tauri::generate_handler![greet, create_manga, next, last, refresh, step_next, step_last, add_password, pick_file, jump_to, page_count, home, end, focus_window, show_guide, current_page, update_page_count, load_config, error_test])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
