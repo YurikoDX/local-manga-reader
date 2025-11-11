@@ -8,7 +8,8 @@ pub const EXT_EPUB: &str = "epub";
 pub const EXT_7Z: &str = "7z";
 pub const EXT_PDF: &str = "pdf";
 pub const EXT_CBZ: &str = "cbz";
-pub const SUPPORTED_FILE_FORMATS: &[&str; 5] = &[EXT_ZIP, EXT_EPUB, EXT_7Z, EXT_PDF, EXT_CBZ];
+pub const EXT_MOBI: &str = "mobi";
+pub const SUPPORTED_FILE_FORMATS: &[&str; 6] = &[EXT_ZIP, EXT_EPUB, EXT_7Z, EXT_PDF, EXT_CBZ, EXT_MOBI];
 pub const SUPPORTED_IMG_FORMATS: &[&str; 7] = &[
     "jpg",
     "jpeg",

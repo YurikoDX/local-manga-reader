@@ -22,6 +22,9 @@ use sevenz_source::SevenzSource;
 mod pdf_source;
 use pdf_source::PdfSource;
 
+mod mobi_source;
+use mobi_source::MobiSource;
+
 pub type FileBytes = Vec<u8>;
 
 lazy_static::lazy_static! {
@@ -145,6 +148,7 @@ pub fn create_source(path: &Path, password: Option<String>) -> anyhow::Result<Bo
                     EXT_7Z => Ok(Box::new(SevenzSource::new(path, password)?)),
                     EXT_PDF => Ok(Box::new(PdfSource::new(path)?)),
                     EXT_CBZ => Ok(Box::new(ZippedSource::new(path, password)?)),
+                    EXT_MOBI => Ok(Box::new(MobiSource::new(path)?)),
                     _ => Err(anyhow::anyhow!("不支持的文件格式")),
                 },
                 None => Err(anyhow::anyhow!("非法的后缀名")),
