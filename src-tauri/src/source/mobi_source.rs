@@ -36,8 +36,9 @@ impl MobiSource {
         let images = mobi.raw_records()
             .range(mobi.metadata.mobi.first_image_index as usize ..)
             .iter()
-            .filter(|record| image::guess_format(record.content).is_ok())
-            .map(|record| record.content.to_vec())
+            .map(|record| record.content)
+            .filter(|x| x.len() > 1 << 15 && image::guess_format(x).is_ok())
+            .map(|x| x.to_vec())
             .collect();
 
         Ok(Self {
