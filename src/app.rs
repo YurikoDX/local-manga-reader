@@ -1,20 +1,19 @@
-use js_sys::{Object, Reflect};
+use js_sys::{Object, Reflect, Date};
 use leptos::task::spawn_local;
+use leptos::ev;
+use leptos::logging::log;
 use leptos::prelude::*;
+use leptos::html;
+use web_sys::{HtmlCanvasElement, CanvasRenderingContext2d};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use wasm_bindgen::prelude::*;
-use leptos::*;
-use leptoaster::*;
+use leptoaster::{Toaster, provide_toaster, expect_toaster};
 
 use web_sys::KeyboardEvent;
 
-use shared::{CreateMangaResult, LoadPageResult, ImageData};
+use shared::{CreateMangaResult, ImageData, LoadPage};
 use shared::config::{Config, InputAction};
 use std::collections::HashMap;
-
-// lazy_static::lazy_static! {
-//     static ref SUPPORTED_FILE_FORMAT: HashSet<&'static str> = shared::SUPPORTED_FILE_FORMATS.iter().copied().collect();
-// }
 
 #[wasm_bindgen]
 extern "C" {
@@ -28,42 +27,54 @@ extern "C" {
     fn convert_file_src(file_path: &str) -> String;
 }
 
-#[derive(Deserialize, Serialize)]
-struct CreateMangaPayload {
-    path: String,
+#[derive(Deserialize, Serialize, Default)]
+struct CreateMangaPayload<'a> {
+    path: &'a str,
+    pwd: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
-struct PageTurnPayload {
-    count: usize,
+struct SetCurrentPayload {
+    current: usize,
+    size: usize,
 }
 
-#[derive(Deserialize, Serialize)]
-struct JumpPagePayload {
-    index: usize,
-    count: usize,
-}
-
-#[derive(Deserialize, Serialize)]
-struct TextPayload {
-    text: String,
+#[allow(dead_code)]
+/// 模拟长时间运行的测试用代码
+fn sleep_5s() {
+    log!("别急");
+    let now = Date::now();
+    let then = now + 5_000.;
+    while Date::now() < then {}
 }
 
 #[component]
 pub fn App() -> impl IntoView {
     provide_toaster();
-    let toaster = StoredValue::new(expect_toaster());    
+    let toaster = StoredValue::new(expect_toaster());
 
     let (size, set_size) = signal(2_usize);
-    let (img_data, set_img_data) = signal(vec![ImageData::default(); size.get_untracked()]);
+    let (sha256, set_sha256) = signal([0_u8; 32]);
+    let img_datas = StoredValue::new(vec![ImageData::NoData; 0]);
+    let (showing_img, set_showing_img) = signal(vec![ImageData::NoData; size.get_untracked()]);
     let (reading_direction, set_reading_direction) = signal(true);
     let (empty_manga, set_empty_manga) = signal(true);
     let (page_count, set_page_count) = signal(0_usize);
     let (cmd_map, set_cmd_map) = signal(HashMap::new());
-    let (scroll_threshold, set_scroll_threshold) = signal(3.);
+    let (scroll_threshold, set_scroll_threshold) = signal(3.0_f64);
     let (current_page, set_current_page) = signal(0);
     let (show_page_number, set_show_page_number) = signal(false);
     let (toaster_loaded, set_toaster_loaded) = signal(false);
+    let path = StoredValue::new(String::new());
+    let (loaded_indices, set_loaded_indices) = signal(vec![false; 0]);
+
+    let refresh_showing = move || {
+        let current = current_page.get_untracked();
+        let size = size.get_untracked();
+        let mut v = img_datas.with_value(|x| x[current..x.len().min(current + size)].to_vec());
+        v.resize(size, Default::default());
+        set_showing_img.set(v);
+    };
 
     Effect::new(move || {
         if toaster_loaded.get() {
@@ -82,161 +93,116 @@ pub fn App() -> impl IntoView {
     });
 
     let get_input = |prompt: &str| -> Option<String> {
-        if let Some(resp) = web_sys::window().and_then(|win| win.prompt_with_message(prompt).ok()) {
-            resp
-        } else {
-            Default::default()
+        web_sys::window().and_then(|win| win.prompt_with_message(prompt).ok()).unwrap_or_default()
+    };
+
+    let cancelled_create = move || {
+        if sha256.get_untracked().iter().all(|x| *x == 0) {
+            set_empty_manga.set(true);
         }
     };
 
-    // 通用：调用指定命令，返回 Vec<String> 并更新两张图
-    let load_and_show = move |cmd: &'static str| {
-        spawn_local(async move {
-            let payload = PageTurnPayload { count: size.get_untracked() };
-            let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-            let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
-            match resp {
-                LoadPageResult::Success(paths) => {
-                    set_img_data.set(paths);
-                    set_current_page.set(
-                        serde_wasm_bindgen::from_value(invoke("current_page", JsValue::null()).await).unwrap()
-                    );
-                },
-                LoadPageResult::Keep => (),
-                LoadPageResult::NeedPassword => {
-                    loop {
-                        let pwd = match get_input("请输入解压密码：") {
-                            Some(x) => x,
-                            None => break,
-                        };
-                        let payload = TextPayload { text: pwd };
-                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-                        let _resp: bool = serde_wasm_bindgen::from_value(invoke("add_password", args).await).unwrap();
-                        let payload = PageTurnPayload { count: size.get_untracked() };
-                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-                        let resp: LoadPageResult = serde_wasm_bindgen::from_value(invoke(cmd, args).await).unwrap();
-                        match resp {
-                            LoadPageResult::Success(paths) => {
-                                set_img_data.set(paths);
-                                break;
-                            },
-                            LoadPageResult::Keep => unreachable!(),
-                            LoadPageResult::NeedPassword => {
-                                web_sys::window().and_then(|win| win.confirm_with_message("密码错误").ok());
-                            },
-                            LoadPageResult::Other(e) => {
-                                web_sys::window().and_then(|win| win.alert_with_message(format!("其他错误：{}", e).as_str()).ok());
-                            },
-                        }
-                    }
-                },
-                LoadPageResult::Other(e) => {
-                    web_sys::window().and_then(|win| win.alert_with_message(format!("错误：{}", e).as_str()).ok());
-                },
-            }
-            if page_count.get_untracked() == 0 {
-                let resp: usize = serde_wasm_bindgen::from_value(invoke("update_page_count", JsValue::null()).await).unwrap();
-                set_page_count.set(resp);
-            }
-        })
-    };
-
-    let create_manga = move |path: String| {
+    let create_manga = move |pwd: Option<String>| {
         spawn_local(async move {
             invoke("focus_window", JsValue::null()).await;
-            let payload = CreateMangaPayload { path: path };
+            let path = path.read_value();
+            let payload = CreateMangaPayload { path: path.as_str(), pwd };
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-            let resp: CreateMangaResult = serde_wasm_bindgen::from_value(invoke("create_manga", args).await).unwrap();
-            match resp {
-                CreateMangaResult::Success(x) => {
-                    set_page_count.set(x);
-                    load_and_show("refresh");
-                    set_empty_manga.set(false);
-                },
-                CreateMangaResult::Other(e) => {
-                    web_sys::window().and_then(|window| window.alert_with_message(format!("载入漫画出错：{}", e).as_str()).ok());
-                }
-            }
+            toaster.with_value(|x| x.info("正在读取漫画信息"));
+            invoke("create_manga", args).await;
         });
+    };
+
+    let create_manga_with_pwd = move || {
+        let pwd = get_input("请输入解压密码：");
+        if pwd.is_none() {
+            cancelled_create();
+        } else {
+            create_manga(pwd);
+        }
     };
 
     let pick_manga = move || {
         spawn_local(async move {
             let resp: Option<String> = serde_wasm_bindgen::from_value(invoke("pick_file", JsValue::null()).await).unwrap();
-            if let Some(path) = resp {
-                create_manga(path);
+            if let Some(x) = resp {
+                *path.write_value() = x;
+                create_manga(None);
+            } else {
+                cancelled_create();
             }
         });
+    };
+
+    let page_next = move |count: usize| {
+        let current = current_page.get_untracked();
+        let page_count = page_count.get_untracked();
+        if current + count < page_count {
+            set_current_page.set(current + count);
+        }
+    };
+
+    let page_last = move |count: usize| {
+        let current = current_page.get_untracked();
+        if current > 0 {
+            set_current_page.set(current.saturating_sub(count));
+        }
+    };
+
+    let jump_to = move |target: usize| {
+        let target = target.min(page_count.get_untracked().saturating_sub(size.get_untracked()));
+        set_current_page.set(target);
     };
 
     let jump = move || {
         let prompt = format!("请输入目标页码（共 {} 页）：", page_count.get_untracked());
         if let Some(page_index_s) = get_input(prompt.as_str()) {
             let page_index_s: String = page_index_s.chars().filter(|x| '0' <= *x && *x <= '9').collect();
-            if !page_index_s.is_empty() {
-                if let Ok(index) = page_index_s.parse::<usize>() {
-                    let index = index.saturating_sub(1);
-                    let count = size.get_untracked();
-                    spawn_local(async move {
-                        let payload = JumpPagePayload { index, count };
-                        let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-                        let _: () = serde_wasm_bindgen::from_value(invoke("jump_to", args).await).unwrap();
-                        load_and_show("refresh");
-                    });
-                }
-            }
+            if let Ok(index) = page_index_s.parse::<usize>() {
+                jump_to(index);
+            }            
         }
     };
 
     let action_handler = move |input_action_code: &str| {
         match cmd_map.with(|x| x.get(input_action_code).copied()) {
             Some(input_action) => match input_action {
-                InputAction::PageNext => load_and_show("next"),
-                InputAction::PageLast => load_and_show("last"),
-                InputAction::PageLeft => load_and_show(
-                    if reading_direction.get_untracked() {
-                        "next"
-                    } else {
-                        "last"
-                    }
-                ),
-                InputAction::PageRight => load_and_show(
-                    if reading_direction.get_untracked() {
-                        "last"
-                    } else {
-                        "next"
-                    }
-                ),
-                InputAction::PageStepNext => load_and_show("step_next"),
-                InputAction::PageStepLast => load_and_show("step_last"),
-                InputAction::PageStepLeft => load_and_show(
-                    if reading_direction.get_untracked() {
-                        "step_next"
-                    } else {
-                        "step_last"
-                    }
-                ),
-                InputAction::PageStepRight => load_and_show(
-                    if reading_direction.get_untracked() {
-                        "step_last"
-                    } else {
-                        "step_next"
-                    }
-                ),
-                InputAction::PageHome => load_and_show("home"),
-                InputAction::PageEnd => load_and_show("end"),
+                InputAction::PageNext => page_next(size.get_untracked()),
+                InputAction::PageLast => page_last(size.get_untracked()),
+                InputAction::PageLeft => if reading_direction.get_untracked() {
+                    page_next(size.get_untracked())
+                } else {
+                    page_last(size.get_untracked())
+                },
+                InputAction::PageRight => if reading_direction.get_untracked() {
+                    page_last(size.get_untracked())
+                } else {
+                    page_next(size.get_untracked())
+                },
+                InputAction::PageStepNext => page_next(1),
+                InputAction::PageStepLast => page_last(1),
+                InputAction::PageStepLeft => if reading_direction.get_untracked() {
+                    page_next(1)
+                } else {
+                    page_last(1)
+                },
+                InputAction::PageStepRight => if reading_direction.get_untracked() {
+                    page_last(1)
+                } else {
+                    page_next(1)
+                },
+                InputAction::PageHome => jump_to(0),
+                InputAction::PageEnd => jump_to(usize::MAX),
                 InputAction::PageJump => jump(),
                 InputAction::PageCountMinus => {
                     let size_before = size.get_untracked();
                     if size_before > 1 {
                         set_size.set(size_before - 1);
-                        load_and_show("refresh");
                     }
                 }
                 InputAction::PageCountPlus => {
                     let size_before = size.get_untracked();
                     set_size.set(size_before + 1);
-                    load_and_show("refresh");
                 },
                 InputAction::ReverseReading => {
                     set_reading_direction.set(!reading_direction.get_untracked());
@@ -250,7 +216,7 @@ pub fn App() -> impl IntoView {
                             leptos::logging::log!("退出全屏");
                         } else {
                             // 如果不在全屏，则进入全屏
-                            if let Ok(_) = document.document_element().unwrap().request_fullscreen() {
+                            if document.document_element().unwrap().request_fullscreen().is_ok() {
                                 leptos::logging::log!("进入全屏");
                             }
                         }
@@ -276,8 +242,9 @@ pub fn App() -> impl IntoView {
         }
     };
 
-    let on_mousedown = move |ev: leptos::ev::MouseEvent| {
+    let on_mousedown = move |ev: ev::MouseEvent| {
         if empty_manga.get_untracked() {
+            set_empty_manga.set(false);
             pick_manga();
         } else {
             match ev.button() {
@@ -307,13 +274,14 @@ pub fn App() -> impl IntoView {
         action_handler(ev.code().as_str());
     });
 
-    // 直接设置事件监听器
+    // 监听拖拽事件
     spawn_local(async move {
         let closure = Closure::wrap(Box::new(move |event: JsValue| {
             // 直接提取 event.payload.paths
             if let Some(payload) = extract_payload_from_event::<DragDropPayload>(event) {
-                if let Some(path) = payload.paths.into_iter().nth(0) {
-                    create_manga(path);
+                if let Some(x) = payload.paths.into_iter().next() {
+                    *path.write_value() = x;
+                    create_manga(None);
                 }
             }
         }) as Box<dyn FnMut(JsValue)>);
@@ -322,22 +290,105 @@ pub fn App() -> impl IntoView {
         closure.forget();
     });
 
+    // 监听漫画加载
+    spawn_local(async move {
+        let closure = Closure::wrap(Box::new(move |event: JsValue| {
+            match extract_payload_from_event::<CreateMangaResult>(event).unwrap() {
+                CreateMangaResult::Success(sha256, page_count) => {
+                    set_sha256.set(sha256);
+                    set_current_page.set(0);
+                    set_page_count.set(page_count);
+                    set_loaded_indices.set(vec![false; page_count]);
+                    img_datas.write_value().clear();
+                    img_datas.write_value().resize(page_count, ImageData::Loading);
+                    refresh_showing();
+                },
+                CreateMangaResult::NeedPassword => create_manga_with_pwd(),
+                CreateMangaResult::Other(e) => {
+                    let m = format!("载入漫画出错：{}", e);
+                    log!("{}", m);
+                    toaster.with_value(|x| x.error(m));
+                    cancelled_create();
+                },
+            }
+        }) as Box<dyn FnMut(JsValue)>);
+ 
+        let _ = listen("load_manga", closure.as_ref().into()).await;
+        closure.forget();
+    });
+
+    // 监听页面加载
+    spawn_local(async move {
+        let closure = Closure::wrap(Box::new(move |event: JsValue| {
+            let LoadPage { sha256: this_sha256, index, len: _, image_data } = extract_payload_from_event(event).unwrap();
+            if this_sha256 == sha256.get_untracked() {
+                *img_datas.write_value().get_mut(index).unwrap() = image_data;
+                set_loaded_indices.set(img_datas.with_value(|x| x.iter().map(|x| matches!(x, ImageData::Loaded(_, _))).collect()));
+                let current = current_page.get_untracked();
+                if current <= index && index < current + size.get_untracked() {
+                    refresh_showing();
+                }
+            }
+        }) as Box<dyn FnMut(JsValue)>);
+ 
+        let _ = listen("load_page", closure.as_ref().into()).await;
+        closure.forget();
+    });
+
+    Effect::new(move || {
+        let current = current_page.get();
+        let size = size.get();
+        refresh_showing();
+        spawn_local(async move {
+            let payload = SetCurrentPayload { current, size };
+            let args = serde_wasm_bindgen::to_value(&payload).unwrap();
+            log!("current_page = {}, size = {}", current, size);
+            invoke("set_current", args).await;
+        });
+    });
+
+    let bar_height = StoredValue::new(String::from("min(3vh, 16px)"));
+
+    let on_mousedown_for_bar = move |ev: ev::MouseEvent| {
+        let rect = ev
+            .target()
+            .unwrap()
+            .unchecked_into::<web_sys::HtmlElement>()
+            .get_bounding_client_rect();
+        let width = rect.width();
+        let x = ev.offset_x() as f64;
+        let coefficient = x / width;
+        log!("click percent: {:.2}%", coefficient * 100.);
+        jump_to((page_count.get_untracked() as f64 * coefficient) as usize);
+    };
+
     view! {
         <Toaster stacked={false} />
         <ToastPoster set_toaster_loaded=set_toaster_loaded />
-        <div class="viewport"
+        <div class="main"
             on:contextmenu=|ev| ev.prevent_default()
-            on:mousedown=on_mousedown
             on:wheel=on_wheel
         >
             {move || {
-                    let v = img_data.get();
-                let aspect_ratio: f64 = v.iter().map(|x| x.aspect_ratio()).sum();
-                let width = (1000. * aspect_ratio) as u32;
+                let v = showing_img.get();
                 let flag = reading_direction.get();
-                    view! { <MultiImageViewer image_datas=v width=width reverse=flag /> }
+                
+                view! {
+                    <MultiImageViewer
+                        image_datas=v
+                        reverse=flag
+                        bar_height=bar_height.get_value()
+                        on_mousedown=on_mousedown
+                    />
                 }
-            }
+            }}
+            <LoadingBar
+                loaded_indices=loaded_indices
+                bar_height=bar_height.get_value()
+                current_page=current_page
+                size=size
+                on_mousedown=on_mousedown_for_bar
+            />
         </div>
         <Show when=move || show_page_number.get()>
             <CounterDisplay current=current_page size=size page_count=page_count />
@@ -351,7 +402,7 @@ struct DragDropPayload {
 }
 
 // 辅助函数：从事件对象中提取 payload
-fn extract_payload_from_event<'de, T: DeserializeOwned>(event: JsValue) -> Option<T> {
+fn extract_payload_from_event<T: DeserializeOwned>(event: JsValue) -> Option<T> {
     // 使用 serde 直接反序列化
     let obj: Object = Object::from(event);
     let payload  = Reflect::get(&obj, &"payload".into()).ok()?;
@@ -383,11 +434,15 @@ pub fn ToastPoster(set_toaster_loaded: WriteSignal<bool>) -> impl IntoView {
 }
 
 #[component]
-pub fn MultiImageViewer(image_datas: Vec<ImageData>, width: u32, reverse: bool) -> impl IntoView {
-    let style = format!("--w:{}px; --h:1000px; width:var(--w); height:var(--h); --scale:min(100vw / var(--w), 100vh / var(--h)); transform:scale(var(--scale));", width);
+pub fn MultiImageViewer(image_datas: Vec<ImageData>, reverse: bool, bar_height: String, on_mousedown: impl Fn(ev::MouseEvent) + 'static) -> impl IntoView {
+    let aspect_ratio: f64 = image_datas.iter().map(|x| x.aspect_ratio()).sum();
+    let width = (297. * aspect_ratio) as u32;
+    let viewport_style = format!("--viewporth:max(100vh - {}, 0px); height:var(--viewporth); width: 100wh", bar_height);
+    let style = format!("--w:{}px; --h:297px; width:var(--w); height:var(--h); --scale:min(100vw / var(--w), var(--viewporth) / var(--h)); transform:scale(var(--scale));", width);
     
     view! {
-        <div class="strip" style=style>
+        <div class="viewport" style=viewport_style>
+        <div class="strip" style=style on:mousedown=on_mousedown>
             {
                 if reverse {
                     image_datas.into_iter().rev().map(|src| view! { <ImageViewer image_data=src /> }).collect_view()
@@ -396,19 +451,21 @@ pub fn MultiImageViewer(image_datas: Vec<ImageData>, width: u32, reverse: bool) 
                 }
             }
         </div>
+        </div>
     }
 }
 
 #[component]
 pub fn ImageViewer(image_data: ImageData) -> impl IntoView {
-    let file_path = if image_data.is_in_public() {
-        image_data.path().to_string()
-    } else {
-        convert_file_src(image_data.path())
-    };
-
-    view! {
-        <img src=file_path />
+    match image_data {
+        ImageData::Loaded(path, _) => {
+            let url = convert_file_src(path.as_str());
+            view! { <img src=url.as_str() /> }.into_any()
+        },
+        ImageData::Loading => view! { 
+            <img class="loading-gif" src=shared::LOADING_GIF /> 
+        }.into_any(),
+        ImageData::NoData => view! { <img src=shared::NO_DATA /> }.into_any(),
     }
 }
 
@@ -430,5 +487,63 @@ pub fn CounterDisplay(current: ReadSignal<usize>, size: ReadSignal<usize>, page_
                 }
             }
         </div>
+    }
+}
+
+#[component]
+pub fn LoadingBar(loaded_indices: ReadSignal<Vec<bool>>, bar_height: String, current_page: ReadSignal<usize>, size: ReadSignal<usize>, on_mousedown: impl Fn(ev::MouseEvent) + 'static) -> impl IntoView {
+    let canvas_ref = NodeRef::<html::Canvas>::new();
+    let style = format!("bottom: 0; width: 100vw; height: {}; image-rendering: pixelated; position: fixed; cursor: pointer;", bar_height);
+
+    let draw = move |canvas: HtmlCanvasElement, bits: &[bool], current: usize, size: usize| {
+        const H: f64 = 1.;
+        canvas.set_height(1);
+        let ctx = canvas
+            .get_context("2d")
+            .unwrap()
+            .unwrap()
+            .dyn_into::<CanvasRenderingContext2d>()
+            .unwrap();
+        if bits.is_empty() {
+            log!("对的");
+            canvas.set_width(1);
+            ctx.set_fill_style_str("#bfc9d1");
+            ctx.fill_rect(0., 0., 1., H);
+        } else {
+            let w = bits.len() as f64;
+
+            canvas.set_width(bits.len() as u32);
+
+            ctx.set_fill_style_str("#bfc9d1");
+            ctx.fill_rect(0.0, 0.0, w, H);
+
+            ctx.set_fill_style_str("#39C5BB");
+            let mut iter = bits.iter().copied().chain([false]).enumerate();
+            while let Some(start) = iter.find_map(|(index, x)| x.then_some(index)) {
+                let end = iter.find_map(|(index, x)| (!x).then_some(index)).unwrap();
+                ctx.fill_rect(start as f64, 0., (end - start) as f64, H);
+            }
+
+            ctx.set_fill_style_str("#E14A96");
+            ctx.fill_rect(current as f64, 0., size as f64, H);
+        }
+    };
+
+    Effect::new(move |_| {
+        let loaded_indices = loaded_indices.get();
+        let bits = loaded_indices.as_slice();
+        let current = current_page.get();
+        let size = size.get();
+        let canvas = canvas_ref.get().expect("canvas not mounted");
+        draw(canvas, bits, current, size);
+    });
+
+    view! {
+        <canvas
+            node_ref=canvas_ref
+            style=style
+            on:mousedown=on_mousedown
+            prop:title=String::from("点击跳转")
+        />
     }
 }
