@@ -1,7 +1,9 @@
-use std::fs::File;
-use std::io::{self, Write, Cursor};
+use std::io::{self, Read, Seek, SeekFrom, Cursor};
 use std::path::{Path, PathBuf};
+use std::ffi::OsStr;
 use std::collections::HashSet;
+use sha2::{Digest, Sha256};
+use tauri::async_runtime::Sender;
 
 use shared::*;
 
@@ -27,8 +29,12 @@ lazy_static::lazy_static! {
 }
 
 pub fn check_valid_ext(file_name: impl AsRef<Path>) -> bool {
-    let ext = file_name.as_ref().extension().unwrap_or_default().to_ascii_lowercase();
-    SUPPORTED_IMG_FORMATS_MAP.contains(ext.to_str().unwrap_or_default())
+    let path = file_name.as_ref();
+    path.iter().next().unwrap_or_default() != OsStr::new("__MACOSX")
+    && {
+        let ext = path.extension().unwrap_or_default().to_ascii_lowercase();
+        SUPPORTED_IMG_FORMATS_MAP.contains(ext.to_str().unwrap_or_default())
+    }
 }
 
 pub fn get_aspect_ratio(content: impl AsRef<[u8]>) -> f64 {
@@ -38,17 +44,36 @@ pub fn get_aspect_ratio(content: impl AsRef<[u8]>) -> f64 {
     width as f64 / height as f64
 }
 
+pub fn cal_sha256(mut stream: impl Seek + Read) -> io::Result<[u8; 32]> {
+    stream.seek(SeekFrom::Start(0))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 1 << 20];  
+    loop {
+        let x = stream.read(&mut buffer)?;
+        if x == 0 {
+            // 计算并返回
+            stream.seek(SeekFrom::Start(0))?;
+            break Ok(hasher.finalize().into());
+        }
+        hasher.update(&buffer[0..x]);
+    }
+}
+
+pub fn write_cache(index: usize, content: FileBytes, cache_dir: &Path) -> io::Result<PageCache> {
+    let path = cache_dir.join(format!("page_{:03}", index));
+    PageCache::new(content, path)
+}
+
+#[derive(Debug)]
 pub struct PageCache {
     path: PathBuf,
     aspect_ratio: f64,
 }
 
 impl PageCache {
-    pub fn new(content: impl AsRef<[u8]>, path: impl AsRef<Path>) -> io::Result<Self> {
-        let mut file = File::create(path.as_ref())?;
-        file.write_all(content.as_ref())?;
-        let path = path.as_ref().to_path_buf();
-        let aspect_ratio = get_aspect_ratio(content);
+    pub fn new(content: impl AsRef<[u8]>, path: PathBuf) -> io::Result<Self> {
+        let aspect_ratio = get_aspect_ratio(content.as_ref());
+        std::fs::write(path.as_path(), content)?;
 
         Ok(Self { path, aspect_ratio })
     }
@@ -72,50 +97,59 @@ impl Drop for PageCache {
 }
 
 pub trait PageSource: Send + Sync {
-    fn set_cache_dir(&mut self, cache_dir: PathBuf);
-    fn get_page_data(&mut self, index: usize) -> anyhow::Result<ImageData>;
-    fn add_password(&mut self, pwd: Vec<u8>) -> bool;
+    /// 该方法无需考虑索引越界的情况，相反，调用处需要保证索引有效
+    fn get_page_bytes(&mut self, index: usize) -> anyhow::Result<FileBytes>;
     fn page_count(&self) -> usize;
+    fn sha256(&self) -> &[u8; 32];
+
+    fn is_solid(&self) -> bool { false }
+    fn get_all_page_bytes(&mut self, _tx: Sender<(usize, FileBytes)>) -> bool { false }
+
+    fn cache(&mut self, index: usize, cache: &mut Option<PageCache>, cache_dir: &Path) -> anyhow::Result<()> {
+        if index < self.page_count() && cache.is_none() {
+            let content = self.get_page_bytes(index)?;
+            let page_cache = write_cache(index, content, cache_dir)?;
+            cache.replace(page_cache);
+            Ok(())
+        } else {
+            unreachable!("不应传入越界的索引值 或 重复缓存")
+        }
+    }
 }
 
 pub struct NoSource;
 
 impl PageSource for NoSource {
-    fn set_cache_dir(&mut self, _: PathBuf) {}
-
-    fn get_page_data(&mut self, _index: usize) -> anyhow::Result<ImageData> {
-        Ok(Default::default())
-    }
-
-    fn add_password(&mut self, _pwd: Vec<u8>) -> bool {
-        false
+    fn get_page_bytes(&mut self, _index: usize) -> anyhow::Result<FileBytes> {
+        unreachable!()
     }
 
     fn page_count(&self) -> usize {
         0
     }
+
+    fn sha256(&self) -> &'static [u8; 32] {
+        &[0; 32]
+    }
 }
 
-impl TryFrom<&Path> for Box<dyn PageSource> {
-    type Error = anyhow::Error;
-
-    fn try_from(path: &Path) -> Result<Self, Self::Error> {
-        if path.is_dir() {
-            Ok(Box::new(DirectorySource::new(path)?))
-        } else {
-            match path.extension() {
-                Some(ext) => match ext.to_str() {
-                    Some(ext) => match ext.to_ascii_lowercase().as_str() {
-                        EXT_ZIP => Ok(Box::new(ZippedSource::new(path)?)),
-                        EXT_EPUB => Ok(Box::new(EpubSource::new(path)?)),
-                        EXT_7Z => Ok(Box::new(SevenzSource::new(path)?)),
-                        EXT_PDF => Ok(Box::new(PdfSource::new(path)?)),
-                        _ => Err(anyhow::anyhow!("不支持的文件格式")),
-                    },
-                    None => Err(anyhow::anyhow!("非法的后缀名")),
+pub fn create_source(path: &Path, password: Option<String>) -> anyhow::Result<Box<dyn PageSource>> {
+    if path.is_dir() {
+        Ok(Box::new(DirectorySource::new(path)?))
+    } else {
+        match path.extension() {
+            Some(ext) => match ext.to_str() {
+                Some(ext) => match ext.to_ascii_lowercase().as_str() {
+                    EXT_ZIP => Ok(Box::new(ZippedSource::new(path, password)?)),
+                    EXT_EPUB => Ok(Box::new(EpubSource::new(path)?)),
+                    EXT_7Z => Ok(Box::new(SevenzSource::new(path, password)?)),
+                    EXT_PDF => Ok(Box::new(PdfSource::new(path)?)),
+                    EXT_CBZ => Ok(Box::new(ZippedSource::new(path, password)?)),
+                    _ => Err(anyhow::anyhow!("不支持的文件格式")),
                 },
-                None => Err(anyhow::anyhow!("文件后缀名缺失")),
-            }
+                None => Err(anyhow::anyhow!("非法的后缀名")),
+            },
+            None => Err(anyhow::anyhow!("文件后缀名缺失")),
         }
-    }
+    }    
 }

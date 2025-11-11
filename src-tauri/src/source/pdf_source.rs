@@ -4,88 +4,21 @@ use hayro_interpret::hayro_syntax::object::{
     Object,
     dict::keys::{SUBTYPE, IMAGE, WIDTH, HEIGHT},
 };
-use std::path::{Path, PathBuf};
+use sha2::Digest;
+use std::path::Path;
 use std::sync::Arc;
 
-use super::{PageCache, PageSource, FileBytes, ImageData};
+use super::{PageSource, FileBytes};
 
 const DEFAULT_PAGE_HEIGHT: u32 = 1280;
 
 pub struct PdfSource {
+    sha256: [u8; 32],
     pdf: Pdf,
-    cache_dir: PathBuf,
-    caches: Vec<Option<PageCache>>,
 }
     
 impl PageSource for PdfSource {
-    fn set_cache_dir(&mut self, cache_dir: PathBuf) {
-        self.cache_dir = cache_dir;
-    }
-
-    fn get_page_data(&mut self, index: usize) -> anyhow::Result<ImageData> {
-        if index >= self.page_count() {
-            // 索引出界
-            return Ok(Default::default());
-        }
-        self.cache(index)?;
-        if let Some(x) = self.caches.get(index) {
-            let page_cache = x.as_ref().unwrap();
-            Ok(page_cache.get_data())
-        } else {
-            dbg!(index);
-            dbg!(self.caches.len());
-            unreachable!();
-        }
-    }
-
-    fn add_password(&mut self, _pwd: Vec<u8>) -> bool {
-        false
-    }
-
-    fn page_count(&self) -> usize {
-        self.caches.len()
-    }
-}
-
-impl PdfSource {
-    pub fn new(file_path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let file_content = std::fs::read(file_path.as_ref())?;
-        let pdf = Pdf::new(Arc::new(file_content)).map_err(|_| anyhow::anyhow!("加载 pdf 文件失败"))?;
-        let cache_dir = Default::default();
-        let len = pdf.pages().len();
-        let caches: Vec<Option<PageCache>> = (0..len).map(|_| None).collect();
-
-        Ok(Self {
-            pdf,
-            cache_dir,
-            caches,
-        })
-    }
-
-    fn write_cache(&mut self, index: usize, content: FileBytes) -> anyhow::Result<()> {
-        let page_cache = {
-            let cache_path = self.cache_dir.join(format!("{:04}", index).as_str());
-            PageCache::new(content, cache_path)?
-        };
-        self.caches[index] = Some(page_cache);
-        Ok(())
-    }
-
-    fn cache(&mut self, index: usize) -> anyhow::Result<()> {
-        if let Some(None) = self.caches.get(index) {
-            match self.try_extract(index) {
-                Ok(x) => {
-                    self.write_cache(index, x)?;
-                    Ok(())
-                },
-                Err(e) => Err(e),
-            }
-        } else {
-            Ok(())
-        }
-    }
-
-    fn try_extract(&mut self, index: usize) -> anyhow::Result<FileBytes> {
+    fn get_page_bytes(&mut self, index: usize) -> anyhow::Result<FileBytes> {
         let page = &self.pdf.pages()[index];
         let mut max_height = 0;
         let mut max_width = 0;
@@ -98,7 +31,6 @@ impl PdfSource {
                         let h = Self::get_u32_value(&stream, HEIGHT);
                         max_width = max_width.max(w);
                         max_height = max_height.max(h);
-                        eprintln!("w = {}, h = {}", w, h);
                     }
                 }
             }
@@ -117,7 +49,28 @@ impl PdfSource {
             }
         };
         let pixmap = render(page, &Default::default(), &render_settings);
-        Ok(pixmap.take_png())
+        Ok(pixmap.take_png())        
+    }
+
+    fn page_count(&self) -> usize {
+        self.pdf.pages().len()
+    }
+
+    fn sha256(&self) -> &[u8; 32] {
+        &self.sha256
+    }
+}
+
+impl PdfSource {
+    pub fn new(file_path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let file_content = std::fs::read(file_path.as_ref())?;
+        let sha256 = sha2::Sha256::digest(file_content.as_slice()).into();
+        let pdf = Pdf::new(Arc::new(file_content)).map_err(|_| anyhow::anyhow!("加载 pdf 文件失败"))?;
+
+        Ok(Self {
+            sha256,
+            pdf,
+        })
     }
 
     fn get_u32_value(stream: &Stream, key: &[u8]) -> u32 {

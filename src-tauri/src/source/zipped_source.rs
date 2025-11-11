@@ -1,61 +1,67 @@
-use zip::{ZipArchive, read::ZipFile, result::ZipError::{self, *}};
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use zip::{
+    ZipArchive,
+    read::{ZipFile, ZipReadOptions}, 
+    result::ZipError::{InvalidPassword, UnsupportedArchive}
+};
+use std::path::Path;
 use std::fs::File;
 use std::io;
 
-use super::{PageCache, PageSource, FileBytes, ImageData, check_valid_ext};
+use super::{PageSource, FileBytes, check_valid_ext, cal_sha256};
+use shared::NeedPassword;
 
 pub struct ZippedSource {
-    passwords: HashSet<Vec<u8>>,
+    sha256: [u8; 32],
+    password: Option<Vec<u8>>,
     zip_archive: ZipArchive<File>,
-    cache_dir: PathBuf,
-    caches: Vec<Option<PageCache>>,
     indice_table: Vec<usize>,
 }
     
 impl PageSource for ZippedSource {
-    fn set_cache_dir(&mut self, cache_dir: PathBuf) {
-        self.cache_dir = cache_dir;
-    }
-
-    fn get_page_data(&mut self, index: usize) -> anyhow::Result<ImageData> {
-        if index >= self.page_count() {
-            // 索引出界
-            return Ok(Default::default());
-        }
-        let index = self.indice_table[index];
-        self.cache(index)?;
-        if let Some(x) = self.caches.get(index) {
-            let page_cache = x.as_ref().unwrap();
-            Ok(page_cache.get_data())
+    fn get_page_bytes(&mut self, index: usize) -> anyhow::Result<FileBytes> {
+        if let Some(&index) = self.indice_table.get(index) {
+            let file = self.zip_archive.by_index_with_options(index, ZipReadOptions::new().password(self.password.as_deref()))?;
+            Ok(Self::zip_file_to_bytes(file)?)
         } else {
-            dbg!(index);
-            dbg!(&self.indice_table);
-            dbg!(self.caches.len());
-            unreachable!();
+            Ok(Default::default())
         }
-    }
-
-    fn add_password(&mut self, pwd: Vec<u8>) -> bool {
-        self.passwords.insert(pwd)
     }
 
     fn page_count(&self) -> usize {
         self.indice_table.len()
     }
+
+    fn sha256(&self) -> &[u8; 32] {
+        &self.sha256
+    }
 }
 
 impl ZippedSource {
-    pub fn new(file_path: impl AsRef<Path>) -> io::Result<Self> {
-        let file = File::open(file_path.as_ref())?;
-        let passwords = Default::default();
+    pub fn new(file_path: impl AsRef<Path>, password: Option<String>) -> anyhow::Result<Self> {
+        let mut file = File::open(file_path.as_ref())?;
+        let sha256 = cal_sha256(&mut file)?;
+        let password = password.map(|x| x.into_bytes());
+        let pwd = password.as_deref();
         let mut zip_archive = ZipArchive::new(file)?;
-        let cache_dir = Default::default();
+        if zip_archive.is_empty() {
+            return Ok(Self { sha256, password: None, zip_archive, indice_table: Default::default() })
+        }
+
+        if let Some(pwd) = pwd {
+            let encrypted_file_index = Self::get_index_of_an_encrypted_file(&mut zip_archive)?.unwrap();
+            if let Err(InvalidPassword) = zip_archive.by_index_decrypt(encrypted_file_index, pwd.as_ref()) {
+                anyhow::bail!(NeedPassword)
+            }
+        } else if (Self::get_index_of_an_encrypted_file(&mut zip_archive)?).is_some() {
+            anyhow::bail!(NeedPassword)
+        } else {
+            eprintln!("没有密码");
+        }
+
         let indice_table: Vec<usize> = {
             let mut indice_file_name_table: Vec<(usize, String)> = (0..zip_archive.len())
                 .filter_map(|index| {
-                    let entry = zip_archive.by_index(index).ok()?;
+                    let entry = zip_archive.by_index_with_options(index, ZipReadOptions::new().password(pwd)).ok()?;
                     (entry.is_file() && check_valid_ext(entry.name()))
                     .then_some((index, entry.name().to_string()))
                 })
@@ -64,14 +70,24 @@ impl ZippedSource {
             indice_file_name_table.into_iter().map(|(index, _)| index).collect()
         };
 
-        let caches: Vec<Option<PageCache>> = (0..=indice_table.iter().max().copied().unwrap_or(0)).map(|_| None).collect();
-        Ok(Self { 
-            passwords,
+        Ok(Self {
+            sha256,
+            password,
             zip_archive,
-            cache_dir,
-            caches,
             indice_table,
         })
+    }
+    
+    fn get_index_of_an_encrypted_file(zip_archive: &mut ZipArchive<File>) -> anyhow::Result<Option<usize>> {
+        for index in 0..zip_archive.len() {
+            match zip_archive.by_index(index) {
+                Err(InvalidPassword) | Err(UnsupportedArchive(shared::NEED_PASSWORD)) => return Ok(Some(index)),
+                Err(e) => anyhow::bail!(e),
+                _ => (),
+            }
+        }
+
+        Ok(None)        
     }
 
     fn zip_file_to_bytes(mut file: ZipFile<'_, File>) -> io::Result<FileBytes> {
@@ -80,72 +96,12 @@ impl ZippedSource {
         Ok(buffer)
     }
 
-    fn write_cache(&mut self, index: usize, content: FileBytes) -> anyhow::Result<()> {
-        let page_cache = {
-            let cache_path = self.cache_dir.join(format!("{:04}", index).as_str());
-            PageCache::new(content, cache_path)?
-        };
-        self.caches[index] = Some(page_cache);
-        Ok(())
-    }
-
     pub fn rebuild_indice_table(&mut self, img_paths: &[&Path]) {
         self.indice_table.clear();
-        self.caches.clear();
-        let mut indice_table = Vec::with_capacity(300);
-        for &path in img_paths.iter() {
-            let index = self.zip_archive.index_for_path(path).unwrap_or(usize::MAX);
-            indice_table.push(index);
-        }
-        let caches: Vec<Option<PageCache>> = (0..=indice_table.iter().max().copied().unwrap_or(0)).map(|_| None).collect();
-        self.caches = caches;
+        let indice_table: Vec<usize> = img_paths.iter().map(|&path| {
+            self.zip_archive.index_for_path(path).unwrap_or(usize::MAX)
+        }).collect();
+
         self.indice_table = indice_table;
-    }
-
-    fn cache(&mut self, index: usize) -> anyhow::Result<()> {
-        if self.caches.get(index).is_some_and(|x| x.is_none()) {
-            match self.try_extract(index) {
-                Ok(x) => {
-                    self.write_cache(index, x)?;
-                    Ok(())
-                },
-                Err(e) => {
-                    match e.downcast::<ZipError>() {
-                        Ok(zip_error) => {
-                            match zip_error {
-                                UnsupportedArchive(shared::NEED_PASSWORD) => {
-                                    let content = self.try_extract_with_saved_passwords(index)?; 
-                                    self.write_cache(index, content)?;
-                                    Ok(())
-                                },
-                                e => {
-                                    Err(e)?
-                                },
-                            }
-                        },
-                        Err(e) => Err(e),
-                    }
-                },
-            }
-        } else {
-            Ok(())
-        }
-    }
-
-    fn try_extract(&mut self, index: usize) -> anyhow::Result<FileBytes> {
-        let file = self.zip_archive.by_index(index)?;
-        Ok(Self::zip_file_to_bytes(file)?)
-    }
-
-    fn try_extract_with_saved_passwords(&mut self, index: usize) -> anyhow::Result<FileBytes> {
-        for pwd in self.passwords.iter() {
-            dbg!(pwd);
-            if let Ok(file) = self.zip_archive.by_index_decrypt(index, pwd.as_slice()) {
-                if let Ok(x) = Self::zip_file_to_bytes(file) {
-                    return Ok(x);
-                }
-            }
-        }
-        Err(InvalidPassword)?
     }
 }

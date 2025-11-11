@@ -4,25 +4,21 @@ use scraper::{Html, Selector};
 use std::path::{Path, PathBuf};
 use std::io::{Read, Seek};
 
-use super::{PageSource, ZippedSource, ImageData};
+use super::{PageSource, ZippedSource};
 
 pub struct EpubSource(ZippedSource);
 
 impl PageSource for EpubSource {
-    fn add_password(&mut self, _pwd: Vec<u8>) -> bool {
-        false
-    }
-
-    fn get_page_data(&mut self, index: usize) -> anyhow::Result<ImageData> {
-        self.0.get_page_data(index)
+    fn get_page_bytes(&mut self, index: usize) -> anyhow::Result<super::FileBytes> {
+        self.0.get_page_bytes(index)
     }
 
     fn page_count(&self) -> usize {
         self.0.page_count()
     }
 
-    fn set_cache_dir(&mut self, cache_dir: PathBuf) {
-        self.0.set_cache_dir(cache_dir);
+    fn sha256(&self) -> &[u8; 32] {
+        self.0.sha256()
     }
 }
 
@@ -33,9 +29,8 @@ impl EpubSource {
             let doc = EpubDoc::new(path)?;
             get_imgs(doc)
         };
-        let mut inner = ZippedSource::new(path)?;
+        let mut inner = ZippedSource::new(path, None)?;
         let img_paths: Vec<&Path> = img_paths.iter().map(|p| p.as_path()).collect();
-        dbg!(&img_paths);
         inner.rebuild_indice_table(img_paths.as_slice());
 
         Ok(Self(inner))
