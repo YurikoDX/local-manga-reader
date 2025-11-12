@@ -52,3 +52,11 @@ img {
   object-fit: none;
   background: white;
 }
+
+.loading-bar {
+  bottom: 0;
+  width: 100vw;
+  image-rendering: pixelated;
+  position: fixed;
+  cursor: pointer;
+}

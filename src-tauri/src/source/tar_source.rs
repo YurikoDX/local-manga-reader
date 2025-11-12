@@ -59,7 +59,7 @@ impl TarSource {
                     .entry_type()
                     .is_file()
                 &&
-                entry.path().is_ok_and(|path| check_valid_ext(path)))
+                entry.path().is_ok_and(check_valid_ext))
                 .then(|| (entry.path().unwrap().to_path_buf(), {
                     let mut buffer = Vec::with_capacity(entry.header().size().unwrap() as usize);
                     entry.read_to_end(&mut buffer).unwrap();
