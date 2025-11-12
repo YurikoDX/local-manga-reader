@@ -2,9 +2,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::io::{self, Cursor};
 
-use crate::source::cal_sha256;
-
-use super::{PageSource, FileBytes, check_valid_ext};
+use super::{PageSource, FileBytes, check_valid_ext, cal_sha256};
 
 pub struct DirectorySource{
     sha256: [u8; 32],
@@ -31,13 +29,14 @@ impl DirectorySource {
         let source_dir = dir_path.as_ref().to_path_buf();
 
         let mut img_names: Vec<OsString> = std::fs::read_dir(dir_path.as_ref())?
-            .filter_map(|x| x.ok().and_then(|entry| {
+            .flatten()
+            .filter_map(|entry| 
                 entry.file_type()
                     .is_ok_and(|file_type| 
                         file_type.is_file()
                     )
                     .then(|| entry.file_name())
-            }))
+            )
             .filter(|file_name| check_valid_ext(file_name))
             .collect();
         img_names.sort_unstable();

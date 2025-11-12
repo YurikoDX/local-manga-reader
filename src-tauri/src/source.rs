@@ -25,6 +25,9 @@ use pdf_source::PdfSource;
 mod mobi_source;
 use mobi_source::MobiSource;
 
+mod tar_source;
+use tar_source::{TarSource};
+
 pub type FileBytes = Vec<u8>;
 
 lazy_static::lazy_static! {
@@ -149,6 +152,7 @@ pub fn create_source(path: &Path, password: Option<String>) -> anyhow::Result<Bo
                     EXT_PDF => Ok(Box::new(PdfSource::new(path)?)),
                     EXT_CBZ => Ok(Box::new(ZippedSource::new(path, password)?)),
                     EXT_MOBI => Ok(Box::new(MobiSource::new(path)?)),
+                    x @ (EXT_TAR | EXT_XZ | EXT_GZ | EXT_BZ2) => Ok(Box::new(TarSource::new(path, x)?)),
                     _ => Err(anyhow::anyhow!("不支持的文件格式")),
                 },
                 None => Err(anyhow::anyhow!("非法的后缀名")),
