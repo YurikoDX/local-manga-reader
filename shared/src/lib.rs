@@ -9,7 +9,11 @@ pub const EXT_7Z: &str = "7z";
 pub const EXT_PDF: &str = "pdf";
 pub const EXT_CBZ: &str = "cbz";
 pub const EXT_MOBI: &str = "mobi";
-pub const SUPPORTED_FILE_FORMATS: &[&str; 6] = &[EXT_ZIP, EXT_EPUB, EXT_7Z, EXT_PDF, EXT_CBZ, EXT_MOBI];
+pub const EXT_TAR: &str = "tar";
+pub const EXT_XZ: &str = "xz";
+pub const EXT_GZ: &str = "gz";
+pub const EXT_BZ2: &str = "bz2";
+pub const SUPPORTED_FILE_FORMATS: &[&str; 10] = &[EXT_ZIP, EXT_EPUB, EXT_7Z, EXT_PDF, EXT_CBZ, EXT_MOBI, EXT_TAR, EXT_XZ, EXT_GZ, EXT_BZ2];
 pub const SUPPORTED_IMG_FORMATS: &[&str; 7] = &[
     "jpg",
     "jpeg",
