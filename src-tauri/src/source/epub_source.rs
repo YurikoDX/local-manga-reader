@@ -3,6 +3,7 @@ use path_clean::PathClean;
 use scraper::{Html, Selector};
 use std::path::{Path, PathBuf};
 use std::io::{Read, Seek};
+use std::collections::HashSet;
 
 use super::{PageSource, ZippedSource};
 
@@ -68,7 +69,16 @@ fn extract_img_paths(html: &str, base_path: &Path) -> Vec<PathBuf> {
         }
     }
 
-    paths
+    let mut set = HashSet::new();
+
+    paths.into_iter().filter(|path| {
+        if set.contains(path) {
+            false
+        } else {
+            set.insert(path.to_path_buf());
+            true
+        }
+    }).collect()
 }
 
 fn normalize_src(src_raw: &str, base_path: &Path) -> PathBuf {

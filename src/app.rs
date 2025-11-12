@@ -388,6 +388,7 @@ pub fn App() -> impl IntoView {
                 current_page=current_page
                 size=size
                 on_mousedown=on_mousedown_for_bar
+                reading_direction=reading_direction
             />
         </div>
         <Show when=move || show_page_number.get()>
@@ -491,9 +492,17 @@ pub fn CounterDisplay(current: ReadSignal<usize>, size: ReadSignal<usize>, page_
 }
 
 #[component]
-pub fn LoadingBar(loaded_indices: ReadSignal<Vec<bool>>, bar_height: String, current_page: ReadSignal<usize>, size: ReadSignal<usize>, on_mousedown: impl Fn(ev::MouseEvent) + 'static) -> impl IntoView {
+pub fn LoadingBar(
+    loaded_indices: ReadSignal<Vec<bool>>,
+    bar_height: String,
+    current_page: ReadSignal<usize>,
+    size: ReadSignal<usize>,
+    reading_direction: ReadSignal<bool>,
+    on_mousedown: impl Fn(ev::MouseEvent) + 'static
+) -> impl IntoView {
     let canvas_ref = NodeRef::<html::Canvas>::new();
-    let style = format!("bottom: 0; width: 100vw; height: {}; image-rendering: pixelated; position: fixed; cursor: pointer;", bar_height);
+    let height_style = format!("height: {};", bar_height);
+    let (style, set_style) = signal(height_style.clone());
 
     let draw = move |canvas: HtmlCanvasElement, bits: &[bool], current: usize, size: usize| {
         const H: f64 = 1.;
@@ -529,7 +538,7 @@ pub fn LoadingBar(loaded_indices: ReadSignal<Vec<bool>>, bar_height: String, cur
         }
     };
 
-    Effect::new(move |_| {
+    Effect::new(move || {
         let loaded_indices = loaded_indices.get();
         let bits = loaded_indices.as_slice();
         let current = current_page.get();
@@ -538,10 +547,20 @@ pub fn LoadingBar(loaded_indices: ReadSignal<Vec<bool>>, bar_height: String, cur
         draw(canvas, bits, current, size);
     });
 
+    Effect::new(move || {
+        let reading_direction = reading_direction.get();
+        let mut new_style = height_style.clone();
+        if reading_direction {
+            new_style += "transform: scaleX(-1);";
+        }
+        set_style.set(new_style);
+    });
+
     view! {
         <canvas
+            class="loading-bar"
             node_ref=canvas_ref
-            style=style
+            style=move || style.get()
             on:mousedown=on_mousedown
             prop:title=String::from("点击跳转")
         />
