@@ -1,4 +1,5 @@
 use serde::{Serialize, Deserialize};
+
 use std::fmt;
 
 pub const NEED_PASSWORD: &str = "Password required to decrypt file";

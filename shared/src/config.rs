@@ -1,31 +1,38 @@
-use std::{collections::HashMap, fmt::Display};
 use serde::{Serialize, Deserialize};
+
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 pub trait Preset {
     fn preset() -> Self;
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct Config {
     #[serde(default)]
-    pub reading_from_right_to_left: bool,
     pub scroll_threshold: f64,
-    pub show_page_number: bool,
+    pub loading_bar_height: String,
+    pub toast_stacked: bool,
+    pub launch_config: LaunchConfig,
     pub key_bind: KeyBind,
 }
 
 impl Preset for Config {
     fn preset() -> Self {
-        let reading_from_right_to_left = true;
         let scroll_threshold = 3.0;
-        let show_page_number = true;
+        let loading_bar_height = String::from("min(3vh, 16px)");
+        let toast_stacked = false;
+        let launch_config = Preset::preset();
         let key_bind = Preset::preset();
 
         Self {
-            reading_from_right_to_left,
             scroll_threshold,
-            show_page_number,
-            key_bind
+            loading_bar_height,
+            toast_stacked,
+            launch_config,
+            key_bind,
         }        
     }
 }
@@ -44,7 +51,28 @@ impl Display for Config {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct LaunchConfig {
+    pub reading_from_right_to_left: bool,
+    pub show_page_number: bool,
+    pub page_num_per_screen: usize,
+}
+
+impl Preset for LaunchConfig {
+    fn preset() -> Self {
+        let reading_from_right_to_left = true;
+        let show_page_number = true;
+        let page_num_per_screen = 2;
+
+        Self {
+            reading_from_right_to_left,
+            show_page_number,
+            page_num_per_screen,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Eq)]
 pub struct KeyBind {
     page_next: Vec<String>,
     page_last: Vec<String>,
@@ -103,6 +131,29 @@ impl KeyBind {
 
         js.push_str("});");
         js
+    }
+
+    fn get_keys_set(&self) -> [HashSet<&str>; 18] {
+        [
+            &self.page_next,
+            &self.page_last,
+            &self.page_left,
+            &self.page_right,
+            &self.page_step_next,
+            &self.page_step_last,
+            &self.page_step_left,
+            &self.page_step_right,
+            &self.page_home,
+            &self.page_end,
+            &self.page_jump,
+            &self.page_count_minus,
+            &self.page_count_plus,
+            &self.reverse,
+            &self.open,
+            &self.fullscreen,
+            &self.show_help,
+            &self.hide_page_number,
+        ].map(|v| v.iter().map(|s| s.as_str()).collect::<HashSet<&str>>())
     }
 }
 
@@ -289,6 +340,13 @@ impl From<KeyBind> for HashMap<String, InputAction> {
         }
 
         map
+    }
+}
+
+impl PartialEq for KeyBind {
+    fn eq(&self, other: &Self) -> bool {
+        self.get_keys_set().into_iter().zip(other.get_keys_set())
+            .all(|(this, that)| this == that)
     }
 }
 

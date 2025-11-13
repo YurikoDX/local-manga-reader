@@ -1,9 +1,10 @@
+use sha2::{Digest, Sha256};
+use tauri::async_runtime::Sender;
+
 use std::io::{self, Read, Seek, SeekFrom, Cursor};
 use std::path::{Path, PathBuf};
 use std::ffi::OsStr;
 use std::collections::HashSet;
-use sha2::{Digest, Sha256};
-use tauri::async_runtime::Sender;
 
 use shared::*;
 

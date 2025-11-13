@@ -1,9 +1,9 @@
+use sevenz_rust2::{ArchiveReader, Error as SevenzError};
+use tauri::async_runtime::{ Sender};
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::fs::File;
-use tauri::async_runtime::{ Sender};
-
-use sevenz_rust2::{ArchiveReader, Error as SevenzError};
 
 use super::{PageSource, FileBytes, check_valid_ext, cal_sha256};
 use shared::NeedPassword;
