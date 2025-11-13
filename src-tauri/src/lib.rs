@@ -1,16 +1,20 @@
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::async_runtime::{Mutex, JoinHandle, spawn, block_on, channel};
+use tokio::sync::watch;
+use notify::{Event, EventKind, RecursiveMode, Watcher, RecommendedWatcher};
+
 use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::async_runtime::{Mutex, JoinHandle, spawn, block_on, channel};
-use tokio::sync::watch;
-
-pub mod source;
-use source::{PageSource, PageCache, create_source, write_cache};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::Duration;
 
 use shared::{CreateMangaResult, ImageData, LoadPage, SUPPORTED_FILE_FORMATS};
 use shared::config::{Config, Preset};
+
+pub mod source;
+use source::{PageSource, PageCache, create_source, write_cache};
 
 struct MangaBook {
     cache_dir: PathBuf,
@@ -196,6 +200,148 @@ impl AppState {
     }
 }
 
+struct ConfigState {
+    file_path: PathBuf,
+    config: Mutex<Config>,
+    app: AppHandle,
+    message_id: AtomicU8,
+}
+
+impl ConfigState {
+    const MESSAGE: [&str; 6] = [
+        "S读取配置文件成功",
+        "W反序列化配置文件失败，将使用预设配置",
+        "W读取配置文件失败，将使用预设配置",
+        "S新建预设配置文件",
+        "W写入预设配置文件失败",
+        "W新建预设配置文件失败",
+    ];
+
+    pub fn new(app: AppHandle) -> Self {
+        let file_path = app.path().resolve("config.toml", tauri::path::BaseDirectory::AppData).unwrap();
+        let config = Default::default();
+        let message_id = AtomicU8::new(u8::MAX);
+
+        Self {
+            file_path,
+            config,
+            app,
+            message_id,
+        }
+    }
+
+    fn read_config_from_file(&self) -> (Config, u8) {
+        let config_file_path = self.file_path.as_path();
+        if config_file_path.is_file() {
+            match std::fs::read_to_string(config_file_path) {
+                Ok(s) => match Config::try_from(s.as_str()) {
+                    Ok(config) => {
+                        let m = 0;
+                        eprintln!("{}", Self::MESSAGE[m as usize]);
+                        std::io::stderr().flush().unwrap();
+                        (config, m)
+                    },
+                    Err(e) => {
+                        let m = 1;
+                        eprintln!("{}：{}", Self::MESSAGE[m as usize], e);
+                        (Preset::preset(), m)
+                    }
+                },
+                Err(e) => {
+                    let m = 2;
+                    eprintln!("{}：{}", Self::MESSAGE[m as usize], e);
+                    (Preset::preset(), m)
+                }
+            }
+        } else {
+            let config = Config::preset();
+            let m = match std::fs::File::create(config_file_path) {
+                Ok(mut file) => {
+                    eprintln!("新建预设配置文件成功：{}", config_file_path.to_string_lossy());
+                    let s = config.to_string();
+                    match file.write_all(s.as_bytes()) {
+                        Ok(()) => {
+                            let m = 3;
+                            eprintln!("{}", Self::MESSAGE[m as usize]);
+                            m
+                        },
+                        Err(e) => {
+                            let m = 4;
+                            eprintln!("{}： {}", Self::MESSAGE[m as usize], e);
+                            m
+                        },
+                    }
+                },
+                Err(e) => {
+                    let m = 5;
+                    eprintln!("{}： {}", Self::MESSAGE[m as usize], e);
+                    m
+                },
+            };
+
+            (config, m)
+        }
+    }
+
+    pub async fn load_config(&self) -> bool {
+        let (config, m) = self.read_config_from_file();
+        let mut mutex_guard = self.config.lock().await;
+        if *mutex_guard != config {
+            *mutex_guard = config;
+            self.message_id.store(m, Ordering::Relaxed);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn keep_watching(&self) {
+        let (tx, mut rx) = channel(5);
+        self.load_config().await;
+        if let Ok(mut watcher) = RecommendedWatcher::new(move |res: Result<Event, _>| {
+            if let Ok(event) = res {
+                if let EventKind::Modify(_) = event.kind {
+                    let _ = tx.try_send(());
+                }
+            }
+        }, notify::Config::default().with_compare_contents(true).with_follow_symlinks(true)) {
+            watcher.watch(self.file_path.as_path(), RecursiveMode::NonRecursive).expect("创建 watch 事件出错，可能是权限不足");
+            while let Some(()) = rx.recv().await {
+                loop {
+                    tokio::select! {
+                        _ = rx.recv() => continue,
+                        _ = tokio::time::sleep(Duration::from_millis(50)) => break,
+                    }
+                }
+                
+                if self.load_config().await {
+                    self.send_config_and_message().await;
+                }
+            }
+        } else {
+            eprintln!("悲报：不支持配置文件热重载")
+        }
+    }
+
+    pub async fn send_config_and_message(&self) {
+        let message = loop {
+            match self.message_id.load(Ordering::Relaxed) {
+                u8::MAX => tokio::time::sleep(std::time::Duration::from_secs(1)).await,
+                x => break Self::MESSAGE[x as usize],
+            }
+        };
+        let config = self.config.lock().await.clone();
+        self.app.emit("load_config", config).unwrap();
+        self.app.emit("toast", message).unwrap();
+    }
+
+    pub fn get_script(&self) -> String {
+        block_on(async move {
+            self.config.lock().await.key_bind.to_replace_script()
+        })
+    }
+}
+
 fn create_manga_in_background(path: String, password: Option<String>, app: AppHandle, state: Arc<AppState>) {
     let try_create_manga = || -> anyhow::Result<MangaBook> {
         let path = Path::new(path.as_str());
@@ -252,16 +398,11 @@ fn pick_file(app: AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
-fn show_guide(app: AppHandle, state: State<Mutex<Config>>) {
-    // let config = block_on(async move {
-    //     state.lock().await.clone()
-    // });
+fn show_guide(app: AppHandle, state: State<Arc<ConfigState>>) {
     if let Some(window) = app.get_webview_window("guide") {
         let _ = window.set_focus();
     } else {
-        let script = block_on(async move {
-            state.lock().await.key_bind.to_replace_script()
-        });
+        let script = state.get_script();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(10));
             tauri::WebviewWindowBuilder::new(
@@ -287,67 +428,12 @@ fn focus_window(app: AppHandle) {
 }
 
 #[tauri::command]
-fn load_config(app: AppHandle, state: State<Mutex<Config>>) -> Config {
-    let app_data = app.path().resolve("", tauri::path::BaseDirectory::AppData).expect("无法访问 AppData 目录");
-    std::fs::create_dir_all(app_data.as_path()).expect("创建 AppData 目录失败");
-    let config_file_path = app_data.join("config.toml");
-    let (config, m) = if config_file_path.is_file() {
-        match std::fs::read_to_string(config_file_path.as_path()) {
-            Ok(s) => match Config::try_from(s.as_str()) {
-                Ok(config) => {
-                    let m = "S读取配置文件成功";
-                    eprintln!("{}", m);
-                    std::io::stderr().flush().unwrap();
-                    (config, m)
-                },
-                Err(e) => {
-                    let m = "W反序列化配置文件失败，将使用预设配置";
-                    eprintln!("{}：{}", m, e);
-                    (Preset::preset(), m)
-                }
-            },
-            Err(e) => {
-                let m = "W读取配置文件失败，将使用预设配置";
-                eprintln!("{}：{}", m, e);
-                (Preset::preset(), m)
-            }
-        }
-    } else {
-        let config = Config::preset();
-        let m = match std::fs::File::create(config_file_path.as_path()) {
-            Ok(mut file) => {
-                eprintln!("新建预设配置文件成功：{}", config_file_path.to_string_lossy());
-                let s = config.to_string();
-                match file.write_all(s.as_bytes()) {
-                    Ok(()) => {
-                        let m = "S写入预设配置文件。";
-                        eprintln!("{}", m);
-                        m
-                    },
-                    Err(e) => {
-                        let m = "W写入预设配置文件失败";
-                        eprintln!("{}： {}", m, e);
-                        m
-                    },
-                }
-            },
-            Err(e) => {
-                let m = "W新建预设配置文件失败";
-                eprintln!("{}： {}", m, e);
-                m
-            },
-        };
-
-        (config, m)
-    };
-
-    app.emit("toast", m).unwrap();
-    let config_clone = config.clone();
-    block_on(async move {
-        *state.lock().await = config_clone;
+fn read_config(state: State<Arc<ConfigState>>) {
+    let config_state = Arc::clone(state.inner());
+    spawn(async move {
+        eprintln!("从这里读取");
+        config_state.send_config_and_message().await;
     });
-
-    config
 }
 
 #[tauri::command]
@@ -370,6 +456,13 @@ pub fn run() {
 
             let main_win = app.get_webview_window("main").unwrap(); // 主窗口 label=main
             let app_handle = app.handle().clone();
+
+            let config_state = Arc::new(ConfigState::new(app.handle().clone()));
+            app.manage(Arc::clone(&config_state));
+
+            spawn(async move {
+                config_state.keep_watching().await;
+            });
 
             main_win.on_window_event(move |evt| {
                 match evt {
@@ -426,10 +519,10 @@ pub fn run() {
 
             Ok(())
         })
-        .manage(Mutex::new(Config::default()))
+        // .manage(Mutex::new(Config::default()))
         .manage(Arc::new(AppState::new()))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_a_md5, sleep_5s, create_manga, set_current, pick_file, focus_window, show_guide, load_config])
+        .invoke_handler(tauri::generate_handler![get_a_md5, sleep_5s, create_manga, set_current, pick_file, focus_window, show_guide, read_config])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

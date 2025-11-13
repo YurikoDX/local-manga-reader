@@ -1,19 +1,20 @@
 use js_sys::{Object, Reflect, Date};
-use leptos::task::spawn_local;
-use leptos::ev;
-use leptos::logging::log;
-use leptos::prelude::*;
-use leptos::html;
-use web_sys::{HtmlCanvasElement, CanvasRenderingContext2d};
+use leptos::{
+    prelude::*,
+    task::spawn_local,
+    logging::log,
+    html,
+    ev,
+};
+use web_sys::{KeyboardEvent, HtmlCanvasElement, CanvasRenderingContext2d};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use wasm_bindgen::prelude::*;
 use leptoaster::{Toaster, provide_toaster, expect_toaster};
 
-use web_sys::KeyboardEvent;
+use std::collections::HashMap;
 
 use shared::{CreateMangaResult, ImageData, LoadPage};
 use shared::config::{Config, InputAction};
-use std::collections::HashMap;
 
 #[wasm_bindgen]
 extern "C" {
@@ -22,6 +23,9 @@ extern "C" {
     
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"])]
     async fn listen(event: &str, handler: JsValue) -> JsValue;
+
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"])]
+    fn emit(event: &str, payload: &str);
 
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], js_name = convertFileSrc)]
     fn convert_file_src(file_path: &str) -> String;
@@ -51,7 +55,6 @@ fn sleep_5s() {
 #[component]
 pub fn App() -> impl IntoView {
     provide_toaster();
-    let toaster = StoredValue::new(expect_toaster());
 
     let (size, set_size) = signal(2_usize);
     let (sha256, set_sha256) = signal([0_u8; 32]);
@@ -67,6 +70,8 @@ pub fn App() -> impl IntoView {
     let (toaster_loaded, set_toaster_loaded) = signal(false);
     let path = StoredValue::new(String::new());
     let (loaded_indices, set_loaded_indices) = signal(vec![false; 0]);
+    let (bar_height, set_bar_height) = signal(String::from("0px"));
+    let (toast_stacked, set_toast_stacked) = signal(false);
 
     let refresh_showing = move || {
         let current = current_page.get_untracked();
@@ -79,15 +84,7 @@ pub fn App() -> impl IntoView {
     Effect::new(move || {
         if toaster_loaded.get() {
             spawn_local(async move {
-                let js = invoke("load_config", JsValue::null()).await;
-                let config = serde_wasm_bindgen::from_value::<Config>(js).unwrap();
-                let key_bind = config.key_bind;
-                leptos::logging::log!("{:?}", key_bind);
-                let map: HashMap<_, _> = key_bind.into();
-                set_cmd_map.set(map);
-                set_reading_direction.set(config.reading_from_right_to_left);
-                set_scroll_threshold.set(config.scroll_threshold);
-                set_show_page_number.set(config.show_page_number);
+                invoke("read_config", JsValue::null()).await;
             });
         }
     });
@@ -108,7 +105,6 @@ pub fn App() -> impl IntoView {
             let path = path.read_value();
             let payload = CreateMangaPayload { path: path.as_str(), pwd };
             let args = serde_wasm_bindgen::to_value(&payload).unwrap();
-            toaster.with_value(|x| x.info("正在读取漫画信息"));
             invoke("create_manga", args).await;
         });
     };
@@ -123,6 +119,7 @@ pub fn App() -> impl IntoView {
     };
 
     let pick_manga = move || {
+        set_empty_manga.set(false);
         spawn_local(async move {
             let resp: Option<String> = serde_wasm_bindgen::from_value(invoke("pick_file", JsValue::null()).await).unwrap();
             if let Some(x) = resp {
@@ -139,6 +136,8 @@ pub fn App() -> impl IntoView {
         let page_count = page_count.get_untracked();
         if current + count < page_count {
             set_current_page.set(current + count);
+        } else {
+            emit("toast", "W没啦！");
         }
     };
 
@@ -213,11 +212,11 @@ pub fn App() -> impl IntoView {
                         if document.fullscreen_element().is_some() {
                             // 如果已经在全屏，则退出全屏
                             document.exit_fullscreen();
-                            leptos::logging::log!("退出全屏");
+                            log!("退出全屏");
                         } else {
                             // 如果不在全屏，则进入全屏
                             if document.document_element().unwrap().request_fullscreen().is_ok() {
-                                leptos::logging::log!("进入全屏");
+                                log!("进入全屏");
                             }
                         }
                     }
@@ -234,9 +233,10 @@ pub fn App() -> impl IntoView {
             None => {
                 #[cfg(debug_assertions)]
                 {
-                    let m = format!("ev.code() = {}", input_action_code);
-                    leptos::logging::log!("{}", m);
-                    toaster.with_value(|x| x.info(m));
+                    let m = format!("Iev.code() = {}", input_action_code);
+                    log!("{}", &m[1..]);
+
+                    emit("toast", m.as_str());
                 }
             },
         }
@@ -244,7 +244,6 @@ pub fn App() -> impl IntoView {
 
     let on_mousedown = move |ev: ev::MouseEvent| {
         if empty_manga.get_untracked() {
-            set_empty_manga.set(false);
             pick_manga();
         } else {
             match ev.button() {
@@ -281,6 +280,7 @@ pub fn App() -> impl IntoView {
             if let Some(payload) = extract_payload_from_event::<DragDropPayload>(event) {
                 if let Some(x) = payload.paths.into_iter().next() {
                     *path.write_value() = x;
+                    set_empty_manga.set(false);
                     create_manga(None);
                 }
             }
@@ -302,12 +302,12 @@ pub fn App() -> impl IntoView {
                     img_datas.write_value().clear();
                     img_datas.write_value().resize(page_count, ImageData::Loading);
                     refresh_showing();
+                    emit("toast", "S载入漫画成功");
                 },
                 CreateMangaResult::NeedPassword => create_manga_with_pwd(),
                 CreateMangaResult::Other(e) => {
                     let m = format!("载入漫画出错：{}", e);
                     log!("{}", m);
-                    toaster.with_value(|x| x.error(m));
                     cancelled_create();
                 },
             }
@@ -335,6 +335,27 @@ pub fn App() -> impl IntoView {
         closure.forget();
     });
 
+    // 监听配置加载
+    spawn_local(async move {
+        let closure = Closure::wrap(Box::new(move |event: JsValue| {
+            let config: Config = extract_payload_from_event(event).unwrap();
+            let key_bind = config.key_bind;
+            log!("{:?}", key_bind);
+            set_cmd_map.set(key_bind.into());
+            set_scroll_threshold.set(config.scroll_threshold);
+            set_bar_height.set(config.loading_bar_height);
+            set_toast_stacked.set(config.toast_stacked);
+            if empty_manga.get_untracked() {
+                set_reading_direction.set(config.launch_config.reading_from_right_to_left);
+                set_show_page_number.set(config.launch_config.show_page_number);
+                set_size.set(config.launch_config.page_num_per_screen.max(1));
+            }
+        }) as Box<dyn FnMut(JsValue)>);
+ 
+        let _ = listen("load_config", closure.as_ref().into()).await;
+        closure.forget();
+    });
+
     Effect::new(move || {
         let current = current_page.get();
         let size = size.get();
@@ -346,8 +367,6 @@ pub fn App() -> impl IntoView {
             invoke("set_current", args).await;
         });
     });
-
-    let bar_height = StoredValue::new(String::from("min(3vh, 16px)"));
 
     let on_mousedown_for_bar = move |ev: ev::MouseEvent| {
         let rect = ev
@@ -363,7 +382,7 @@ pub fn App() -> impl IntoView {
     };
 
     view! {
-        <Toaster stacked={false} />
+        <Toaster stacked=toast_stacked />
         <ToastPoster set_toaster_loaded=set_toaster_loaded />
         <div class="main"
             on:contextmenu=|ev| ev.prevent_default()
@@ -372,19 +391,20 @@ pub fn App() -> impl IntoView {
             {move || {
                 let v = showing_img.get();
                 let flag = reading_direction.get();
+                let bar_height = bar_height.get();
                 
                 view! {
                     <MultiImageViewer
                         image_datas=v
                         reverse=flag
-                        bar_height=bar_height.get_value()
+                        bar_height=bar_height
                         on_mousedown=on_mousedown
                     />
                 }
             }}
             <LoadingBar
                 loaded_indices=loaded_indices
-                bar_height=bar_height.get_value()
+                bar_height=bar_height
                 current_page=current_page
                 size=size
                 on_mousedown=on_mousedown_for_bar
@@ -435,15 +455,18 @@ pub fn ToastPoster(set_toaster_loaded: WriteSignal<bool>) -> impl IntoView {
 }
 
 #[component]
-pub fn MultiImageViewer(image_datas: Vec<ImageData>, reverse: bool, bar_height: String, on_mousedown: impl Fn(ev::MouseEvent) + 'static) -> impl IntoView {
+pub fn MultiImageViewer(
+    image_datas: Vec<ImageData>,
+    reverse: bool,
+    bar_height: String,
+    on_mousedown: impl Fn(ev::MouseEvent) + 'static
+) -> impl IntoView {
     let aspect_ratio: f64 = image_datas.iter().map(|x| x.aspect_ratio()).sum();
     let width = (297. * aspect_ratio) as u32;
-    let viewport_style = format!("--viewporth:max(100vh - {}, 0px); height:var(--viewporth); width: 100wh", bar_height);
-    let style = format!("--w:{}px; --h:297px; width:var(--w); height:var(--h); --scale:min(100vw / var(--w), var(--viewporth) / var(--h)); transform:scale(var(--scale));", width);
     
     view! {
-        <div class="viewport" style=viewport_style>
-        <div class="strip" style=style on:mousedown=on_mousedown>
+        <div class="multi-viewer" style=format!("--bar-h: {};", bar_height)>
+        <div class="strip" style=format!("--w: {}px;", width) on:mousedown=on_mousedown>
             {
                 if reverse {
                     image_datas.into_iter().rev().map(|src| view! { <ImageViewer image_data=src /> }).collect_view()
@@ -471,12 +494,13 @@ pub fn ImageViewer(image_data: ImageData) -> impl IntoView {
 }
 
 #[component]
-pub fn CounterDisplay(current: ReadSignal<usize>, size: ReadSignal<usize>, page_count: ReadSignal<usize>) -> impl IntoView {
+pub fn CounterDisplay(
+    current: ReadSignal<usize>,
+    size: ReadSignal<usize>,
+    page_count: ReadSignal<usize>
+) -> impl IntoView {
     view! {
-        <div
-            class="counter-display"
-            style="position: absolute; top: 10px; right: 10px; padding-left: 6px; padding-right: 6px; min-width: 30px; height: 30px; background-color: gray; border-radius: 5px; display: flex; justify-content: center; align-items: center; color: white; opacity: 80%;"
-        >
+        <div class="counter-display">
             {move ||
                 {
                     let (cur, size, total) = (current.get(), size.get(), page_count.get());
@@ -494,15 +518,14 @@ pub fn CounterDisplay(current: ReadSignal<usize>, size: ReadSignal<usize>, page_
 #[component]
 pub fn LoadingBar(
     loaded_indices: ReadSignal<Vec<bool>>,
-    bar_height: String,
+    bar_height: ReadSignal<String>,
     current_page: ReadSignal<usize>,
     size: ReadSignal<usize>,
     reading_direction: ReadSignal<bool>,
     on_mousedown: impl Fn(ev::MouseEvent) + 'static
 ) -> impl IntoView {
     let canvas_ref = NodeRef::<html::Canvas>::new();
-    let height_style = format!("height: {};", bar_height);
-    let (style, set_style) = signal(height_style.clone());
+    let (style, set_style) = signal(String::new());
 
     let draw = move |canvas: HtmlCanvasElement, bits: &[bool], current: usize, size: usize| {
         const H: f64 = 1.;
@@ -514,7 +537,6 @@ pub fn LoadingBar(
             .dyn_into::<CanvasRenderingContext2d>()
             .unwrap();
         if bits.is_empty() {
-            log!("对的");
             canvas.set_width(1);
             ctx.set_fill_style_str("#bfc9d1");
             ctx.fill_rect(0., 0., 1., H);
@@ -548,12 +570,12 @@ pub fn LoadingBar(
     });
 
     Effect::new(move || {
+        let mut style = bar_height.with(|s| format!("height: {};", s));
         let reading_direction = reading_direction.get();
-        let mut new_style = height_style.clone();
         if reading_direction {
-            new_style += "transform: scaleX(-1);";
+            style += "transform: scaleX(-1);";
         }
-        set_style.set(new_style);
+        set_style.set(style);
     });
 
     view! {

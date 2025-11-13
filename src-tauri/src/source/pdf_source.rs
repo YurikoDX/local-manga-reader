@@ -5,6 +5,7 @@ use hayro_interpret::hayro_syntax::object::{
     dict::keys::{SUBTYPE, IMAGE, WIDTH, HEIGHT},
 };
 use sha2::Digest;
+
 use std::path::Path;
 use std::sync::Arc;
 

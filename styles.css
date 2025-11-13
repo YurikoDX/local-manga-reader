@@ -25,15 +25,20 @@ img {
   -user-drag: none;
 }
 
-.viewport {
+.multi-viewer {
+  --mv-h: max(100vh - var(--bar-h), 0px);
   width: 100vw;
-  height: 100vh;
+  height: var(--mv-h);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .strip {
+  --h: 297px;
+  height: var(--h);
+  width: var(--w);
+  --scale: min(100vw / var(--w), var(--mv-h) / var(--h));
   display: flex;
   transform: scale(var(--scale));
   transform-origin: center center;
@@ -59,4 +64,21 @@ img {
   image-rendering: pixelated;
   position: fixed;
   cursor: pointer;
+}
+
+.counter-display {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding-left: 6px;
+  padding-right: 6px;
+  min-width: 30px;
+  height: 30px;
+  background-color: gray;
+  border-radius: 5px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: white;
+  opacity: 80%;
 }

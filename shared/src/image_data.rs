@@ -1,4 +1,5 @@
 use serde::{Serialize, Deserialize};
+
 use std::path::Path;
 
 const A4_ASPECT_RATIO: f64 = 210. / 297.;  // Source: public/no_data.svg
