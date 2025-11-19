@@ -336,9 +336,15 @@ impl ConfigState {
     }
 
     pub fn get_script(&self) -> String {
-        block_on(async move {
+        let mut js = block_on(async move {
             self.config.lock().await.key_bind.to_replace_script()
-        })
+        });
+        js.push_str(r#"window.addEventListener('DOMContentLoaded', ()=>{"#);
+        js.push_str( r#"document.getElementById('filePath').textContent = "#);
+        js.push_str(serde_json::to_string(self.file_path.as_path()).unwrap().as_str());
+        js.push(';');
+        js.push_str("});");
+        js
     }
 }
 
