@@ -49,8 +49,18 @@
             text-align: center;
             margin: 0 auto;
         }
-    </style>
-    <style>
+
+        .powered-by {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0.5rem;
+            font-size: 1.4rem;
+            width: 100%;
+            margin: 0 auto;
+            text-align: center;
+        }
+        
         .center-wrap {
             text-align: center;
             width: 100%;
@@ -205,13 +215,14 @@
     </div>
 
     <div class="group">
-        <p style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; font-size: 1.4rem;">
+        <p class="powered-by">
             Powered by
-            <img src="tauri.svg" alt="Tauri" height="80">
+            <img src="tauri.svg" alt="Tauri" title="Tauri" height="80">
             &
-            <img src="leptos.svg" alt="Leptos" height="80">
+            <img src="leptos.svg" alt="Leptos" title="Leptos" height="80">
         </p>
     </div>
+
     <script>
         document.getElementById('filePath').addEventListener('click', e => e.target.select());
     </script>
