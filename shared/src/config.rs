@@ -101,7 +101,7 @@ impl KeyBind {
         use std::fmt::Write;
         let mut js = r#"window.addEventListener('DOMContentLoaded', ()=>{"#.to_string();
 
-        // 与 HTML 里 id 0..15 的顺序保持一致
+        // 与 HTML 里 id 0..17 的顺序保持一致
         let slots: &[&[String]] = &[
             &self.page_next,      // 0
             &self.page_last,      // 1

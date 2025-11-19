@@ -316,6 +316,9 @@ impl ConfigState {
                 
                 if self.load_config().await {
                     self.send_config_and_message().await;
+                    if let Some(win) = self.app.get_webview_window("guide") {
+                        let _ = win.close();
+                    }
                 }
             }
         } else {
@@ -340,11 +343,34 @@ impl ConfigState {
             self.config.lock().await.key_bind.to_replace_script()
         });
         js.push_str(r#"window.addEventListener('DOMContentLoaded', ()=>{"#);
-        js.push_str( r#"document.getElementById('filePath').textContent = "#);
-        js.push_str(serde_json::to_string(self.file_path.as_path()).unwrap().as_str());
+        js.push_str("document.getElementById('filePath').value=");
+        js.push_str(&serde_json::to_string(self.file_path.as_path()).unwrap());
         js.push(';');
         js.push_str("});");
         js
+    }
+
+    pub fn show_guide(&self) {
+        if let Some(window) = self.app.get_webview_window("guide") {
+            let _ = window.set_focus();
+        } else {
+            let script = self.get_script();
+            let app = self.app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                tauri::WebviewWindowBuilder::new(
+                    &app,
+                    "guide",
+                    tauri::WebviewUrl::App("public/guide.html".into()),
+                )
+                .title("操作指南")
+                .initialization_script(script)
+                .inner_size(600.0, 800.0)
+                .resizable(true)
+                .build()
+                .expect("open guide window");
+            });
+        }
     }
 }
 
@@ -404,26 +430,8 @@ fn pick_file(app: AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
-fn show_guide(app: AppHandle, state: State<Arc<ConfigState>>) {
-    if let Some(window) = app.get_webview_window("guide") {
-        let _ = window.set_focus();
-    } else {
-        let script = state.get_script();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            tauri::WebviewWindowBuilder::new(
-                &app,
-                "guide",
-                tauri::WebviewUrl::App("public/guide.html".into()),
-            )
-            .title("操作指南")
-            .initialization_script(script)
-            .inner_size(600.0, 800.0)
-            .resizable(true)
-            .build()
-            .expect("open guide window");
-        });
-    }
+fn show_guide(state: State<Arc<ConfigState>>) {
+    state.show_guide();
 }
 
 #[tauri::command]
