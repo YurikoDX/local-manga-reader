@@ -53,36 +53,25 @@
     <style>
         .center-wrap {
             text-align: center;
+            width: 100%;
         }
 
         .code-block {
             position: relative;
-            display: inline-block;
-            white-space: nowrap;
+            display: block;
+            width:100%;
+            box-sizing:border-box;
             background: #f6f8fa;
-            padding: 12px 12px 12px 60px;
+            padding: 12px;
             border-radius: 6px;
         }
     
         .code-block pre {
             margin: 0;
         }
-    
-        .copy-btn {
-            position: absolute;
-            top: 6px;
-            left: 6px;
-            font-size: 12px;
-            padding: 2px 8px;
-            border: 1px solid #d1d5da;
-            border-radius: 4px;
-            background: #fff;
-            cursor: pointer;
-        }
-    
-        .copy-btn.copied {
-            border-color: #28a745;
-            color: #28a745;
+
+        input {
+            width: 100%;
         }
     </style>
 </head>
@@ -97,8 +86,7 @@
     <div class="center-wrap">
         <p>配置文件地址</p>
         <div class="code-block">
-            <button class="copy-btn" onclick="copyPath(this)">Copy</button>
-            <pre><code id="filePath"></code></pre>
+            <pre><input id="filePath" readonly value="Failed to get config file path." ></pre>
         </div>
     </div>
 
@@ -225,14 +213,7 @@
         </p>
     </div>
     <script>
-        function copyPath(btn) {
-            const text = document.getElementById('filePath').textContent;
-            navigator.clipboard.writeText(text).then(() => {
-                btn.textContent = 'Copied';
-                btn.classList.add('copied');
-                setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
-            });
-        }
+        document.getElementById('filePath').addEventListener('click', e => e.target.select());
     </script>
 </body>
 </html>
