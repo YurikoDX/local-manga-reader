@@ -78,7 +78,7 @@ The error **re-appears** after running `cargo clean` and removing `Cargo.lock`.
 
 - [x] Optimize 7z format support
 - [x] Hide current page count
-- [ ] Preload pages
+- [x] Preload pages
 - [ ] Bookmark feature
 - [ ] Save progress and reading order for each manga
 - [ ] Support more formats
