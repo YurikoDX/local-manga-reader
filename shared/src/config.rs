@@ -97,7 +97,7 @@ pub struct KeyBind {
 impl KeyBind {
     /// 生成一段只在 DOM 就绪后执行的极简替换脚本，
     /// 通过 .initialization_script() 注入即可。
-    pub fn to_replace_script(&self) -> String {
+    pub fn to_replace_script(&self, config_path_path: String) -> String {
         use std::fmt::Write;
         let mut js = r#"window.addEventListener('DOMContentLoaded', ()=>{"#.to_string();
 
@@ -128,6 +128,11 @@ impl KeyBind {
             let text = keys.join(" / ");
             writeln!(&mut js, "document.getElementById('{}').textContent = `{}`;", idx, text).unwrap();
         }
+
+        
+        js.push_str("document.getElementById('filePath').value=");
+        js.push_str(config_path_path.as_str());
+        js.push(';');
 
         js.push_str("});");
         js

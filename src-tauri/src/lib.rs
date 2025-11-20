@@ -339,15 +339,10 @@ impl ConfigState {
     }
 
     pub fn get_script(&self) -> String {
-        let mut js = block_on(async move {
-            self.config.lock().await.key_bind.to_replace_script()
-        });
-        js.push_str(r#"window.addEventListener('DOMContentLoaded', ()=>{"#);
-        js.push_str("document.getElementById('filePath').value=");
-        js.push_str(&serde_json::to_string(self.file_path.as_path()).unwrap());
-        js.push(';');
-        js.push_str("});");
-        js
+        dbg!("running here");
+        block_on(async move {
+            self.config.lock().await.key_bind.to_replace_script(serde_json::to_string(self.file_path.as_path()).unwrap())
+        })
     }
 
     pub fn show_guide(&self) {
