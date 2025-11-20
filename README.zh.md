@@ -74,7 +74,7 @@ Error Failed to parse version `2` for crate `tauri-plugin-opener`
 
 - [x] 优化 7z 格式支持
 - [x] 隐藏当前页码
-- [ ] 预加载页面
+- [x] 预加载页面
 - [ ] 书签功能
 - [ ] 为不同漫画保存进度与阅读顺序
 - [ ] 支持更多格式
