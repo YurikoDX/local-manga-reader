@@ -208,18 +208,9 @@ pub fn App() -> impl IntoView {
                 }
                 InputAction::Open => pick_manga(),
                 InputAction::Fullscreen => {
-                    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
-                        if document.fullscreen_element().is_some() {
-                            // 如果已经在全屏，则退出全屏
-                            document.exit_fullscreen();
-                            log!("退出全屏");
-                        } else {
-                            // 如果不在全屏，则进入全屏
-                            if document.document_element().unwrap().request_fullscreen().is_ok() {
-                                log!("进入全屏");
-                            }
-                        }
-                    }
+                    spawn_local(async move {
+                        invoke("toggle_fullscreen", JsValue::null()).await;
+                    });
                 },
                 InputAction::ShowHelp => {
                     spawn_local(async move {

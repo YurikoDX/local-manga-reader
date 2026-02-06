@@ -457,6 +457,15 @@ fn sleep_5s() {
     eprintln!("等待完毕");
 }
 
+#[tauri::command]
+fn toggle_fullscreen(window: tauri::WebviewWindow) {
+    let is_fullscreen = window.is_fullscreen().unwrap_or_default();
+    match window.set_fullscreen(!is_fullscreen) {
+        Ok(()) => eprintln!("Toggled fullscreen."),
+        Err(e) => eprintln!("Error when toggling fullscreen: {}", e),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -531,7 +540,7 @@ pub fn run() {
         // .manage(Mutex::new(Config::default()))
         .manage(Arc::new(AppState::new()))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_a_md5, sleep_5s, create_manga, set_current, pick_file, focus_window, show_guide, read_config])
+        .invoke_handler(tauri::generate_handler![get_a_md5, sleep_5s, create_manga, set_current, pick_file, focus_window, show_guide, read_config, toggle_fullscreen])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
